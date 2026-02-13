@@ -3,9 +3,8 @@ pub mod string_table;
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use serde_json::Deserializer;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Seek};
+use std::io::BufReader;
 use std::path::Path;
 
 pub use metadata::SnapshotMetadata;

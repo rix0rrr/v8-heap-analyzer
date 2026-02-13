@@ -8,8 +8,10 @@ pub struct RetentionPathFinder<'a> {
 
 #[derive(Debug, Clone)]
 pub struct RetentionPath {
+    #[allow(dead_code)]
     pub length: usize,
     pub nodes: Vec<NodeId>,
+    #[allow(dead_code)]
     pub edge_types: Vec<u8>,
     pub edge_names: Vec<String>,
 }

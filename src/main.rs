@@ -4,19 +4,22 @@ mod graph;
 mod analysis;
 mod paths;
 mod report;
+mod utils;
 
-use analysis::duplicates::DuplicateAnalyzer;
-use analysis::hidden_classes::HiddenClassAnalyzer;
 use anyhow::{Context, Result};
 use clap::Parser;
-use graph::GraphBuilder;
 use parser::SnapshotParser;
-use paths::RetentionPathFinder;
-use report::ReportGenerator;
-use std::collections::HashMap;
+use report::generator::ReportGenerator;
 use std::fs::File;
 use std::path::PathBuf;
 use std::sync::Arc;
+
+// Import the shared analysis functions
+use crate::graph::GraphBuilder;
+use crate::analysis::duplicates::DuplicateAnalyzer;
+use crate::analysis::hidden_classes::HiddenClassAnalyzer;
+use crate::paths::RetentionPathFinder;
+use std::collections::HashMap;
 
 #[derive(Parser)]
 #[command(name = "v8-heap-analyzer")]
@@ -46,15 +49,13 @@ fn main() -> Result<()> {
     println!("Analyzing: {}", cli.input.display());
     println!();
 
-    // Parse snapshot
+    // Parse snapshot metadata for progress reporting
     println!("Parsing snapshot...");
     let parser = SnapshotParser::new(&cli.input)?;
     let (metadata, string_table) = parser.parse_metadata_and_strings()?;
     let string_table = Arc::new(string_table);
     
-    // Get actual counts from the data
     let (node_count, edge_count) = parser.get_actual_counts(&metadata)?;
-    
     println!("  Nodes: {}", node_count);
     println!("  Edges: {}", edge_count);
     println!("  Strings: {}", string_table.len());
@@ -63,7 +64,7 @@ fn main() -> Result<()> {
     // Build graph
     println!("Building graph...");
     let (nodes, edges) = parser.parse_nodes_and_edges()?;
-    let mut builder = GraphBuilder::new(metadata, string_table.clone());
+    let mut builder = GraphBuilder::new(metadata, string_table);
     builder.add_nodes(&nodes)?;
     builder.add_edges(&edges)?;
     let graph = builder.finalize();
@@ -85,7 +86,7 @@ fn main() -> Result<()> {
     println!("  Found {} object types with hidden classes", hidden_class_groups.len());
     println!();
 
-    // Find retention paths for top duplicates
+    // Find retention paths
     println!("Finding retention paths...");
     let path_finder = RetentionPathFinder::new(&graph);
     let mut retention_paths = HashMap::new();
@@ -100,8 +101,21 @@ fn main() -> Result<()> {
     println!();
 
     // Generate report
+    generate_report(&cli, &graph, duplicate_groups, hidden_class_groups, retention_paths)?;
+    
+    println!("Done!");
+    Ok(())
+}
+
+fn generate_report(
+    cli: &Cli,
+    graph: &graph::CompactGraph,
+    duplicate_groups: Vec<analysis::duplicates::DuplicateGroup>,
+    hidden_class_groups: Vec<analysis::hidden_classes::HiddenClassGroup>,
+    retention_paths: HashMap<types::NodeId, Vec<paths::RetentionPath>>,
+) -> Result<()> {
     println!("Generating report...");
-    let generator = ReportGenerator::new(&graph, duplicate_groups, hidden_class_groups, retention_paths);
+    let generator = ReportGenerator::new(graph, duplicate_groups, hidden_class_groups, retention_paths);
     
     if let Some(output_path) = &cli.output {
         let mut output_file = File::create(output_path)
@@ -114,7 +128,6 @@ fn main() -> Result<()> {
         
         println!("Report written to: {}", output_path.display());
     } else {
-        // Write to stdout
         let stdout = std::io::stdout();
         let mut handle = stdout.lock();
         
@@ -124,7 +137,6 @@ fn main() -> Result<()> {
         }
     }
     
-    println!("Done!");
-
     Ok(())
 }
+

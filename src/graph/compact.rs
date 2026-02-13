@@ -6,6 +6,7 @@ pub struct CompactGraph {
     // Node data (Structure of Arrays)
     pub(crate) node_types: Vec<u8>,
     pub(crate) node_names: Vec<u32>,
+    #[allow(dead_code)]
     pub(crate) node_ids: Vec<u32>,
     pub(crate) node_sizes: Vec<u32>,
     pub(crate) node_edge_ranges: Vec<(u32, u32)>,

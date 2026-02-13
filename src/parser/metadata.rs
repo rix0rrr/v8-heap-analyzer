@@ -3,12 +3,16 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize)]
 pub struct SnapshotMetadata {
     pub node_fields: Vec<String>,
+    #[allow(dead_code)]
     pub node_types: Vec<serde_json::Value>,
     pub edge_fields: Vec<String>,
+    #[allow(dead_code)]
     pub edge_types: Vec<serde_json::Value>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub node_count: usize,
     #[serde(default)]
+    #[allow(dead_code)]
     pub edge_count: usize,
 }
 

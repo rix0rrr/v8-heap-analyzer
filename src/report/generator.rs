@@ -3,6 +3,7 @@ use crate::analysis::hidden_classes::HiddenClassGroup;
 use crate::graph::CompactGraph;
 use crate::paths::RetentionPath;
 use crate::types::NodeId;
+use crate::utils::{format_bytes, format_edge_name, format_node_name};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -13,22 +14,6 @@ pub struct ReportGenerator<'a> {
     duplicate_groups: Vec<DuplicateGroup>,
     hidden_class_groups: Vec<HiddenClassGroup>,
     retention_paths: HashMap<NodeId, Vec<RetentionPath>>,
-}
-
-fn format_bytes(bytes: u64) -> String {
-    const KB: u64 = 1024;
-    const MB: u64 = KB * 1024;
-    const GB: u64 = MB * 1024;
-    
-    if bytes >= GB {
-        format!("{:.2} GB", bytes as f64 / GB as f64)
-    } else if bytes >= MB {
-        format!("{:.2} MB", bytes as f64 / MB as f64)
-    } else if bytes >= KB {
-        format!("{:.2} KB", bytes as f64 / KB as f64)
-    } else {
-        format!("{} bytes", bytes)
-    }
 }
 
 impl<'a> ReportGenerator<'a> {
@@ -118,40 +103,15 @@ impl<'a> ReportGenerator<'a> {
     fn format_path(&self, output: &mut dyn Write, path: &RetentionPath) -> Result<()> {
         for (i, &node_id) in path.nodes.iter().enumerate() {
             let name = self.graph.node_name(node_id).unwrap_or("unknown");
-            writeln!(output, "     {} {}", "  ".repeat(i), name)?;
+            writeln!(output, "     {} {}", "  ".repeat(i), format_node_name(name))?;
             
             if i < path.edge_names.len() {
-                let formatted_edge = self.format_edge_name(&path.edge_names[i]);
+                let formatted_edge = format_edge_name(&path.edge_names[i]);
                 writeln!(output, "     {}   .{}", "  ".repeat(i), formatted_edge)?;
             }
         }
         Ok(())
     }
-
-    fn format_edge_name(&self, edge_name: &str) -> String {
-        // Check if it looks like a string value (not a property name)
-        // Property names are typically alphanumeric identifiers
-        if edge_name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$') {
-            edge_name.to_string()
-        } else {
-            // Format as escaped string
-            format!("\"{}\"", escape_string(edge_name))
-        }
-    }
-}
-
-fn escape_string(s: &str) -> String {
-    s.chars()
-        .flat_map(|c| match c {
-            '\n' => vec!['\\', 'n'],
-            '\r' => vec!['\\', 'r'],
-            '\t' => vec!['\\', 't'],
-            '\\' => vec!['\\', '\\'],
-            '"' => vec!['\\', '"'],
-            c if c.is_control() => format!("\\u{:04x}", c as u32).chars().collect(),
-            c => vec![c],
-        })
-        .collect()
 }
 
 #[derive(Serialize)]
@@ -172,16 +132,8 @@ struct Summary {
 mod tests {
     use super::*;
     use crate::parser::StringTable;
+    use crate::utils::format_bytes;
     use std::sync::Arc;
-
-    #[test]
-    fn test_format_bytes() {
-        assert_eq!(format_bytes(500), "500 bytes");
-        assert_eq!(format_bytes(1024), "1.00 KB");
-        assert_eq!(format_bytes(1536), "1.50 KB");
-        assert_eq!(format_bytes(1048576), "1.00 MB");
-        assert_eq!(format_bytes(1073741824), "1.00 GB");
-    }
 
     #[test]
     fn test_generate_text_report() {

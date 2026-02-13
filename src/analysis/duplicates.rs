@@ -1,23 +1,10 @@
 use crate::graph::CompactGraph;
 use crate::types::NodeId;
+use crate::utils::escape_string;
 use ahash::{AHashMap, AHashSet};
 use serde::Serialize;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-
-fn escape_string(s: &str) -> String {
-    s.chars()
-        .flat_map(|c| match c {
-            '\n' => vec!['\\', 'n'],
-            '\r' => vec!['\\', 'r'],
-            '\t' => vec!['\\', 't'],
-            '\\' => vec!['\\', '\\'],
-            '"' => vec!['\\', '"'],
-            c if c.is_control() => format!("\\u{:04x}", c as u32).chars().collect(),
-            c => vec![c],
-        })
-        .collect()
-}
 
 pub struct DuplicateAnalyzer {
     graph: CompactGraph,
@@ -58,37 +45,33 @@ impl DuplicateAnalyzer {
     }
 
     pub fn find_duplicate_strings(&self) -> Vec<DuplicateGroup> {
+        self.find_duplicates_by_type(2, "String", |analyzer, node_id| {
+            analyzer.graph.node_name(node_id)
+                .map(|name| analyzer.hash_string(name))
+        })
+    }
+
+    pub fn find_duplicate_objects(&self) -> Vec<DuplicateGroup> {
+        self.find_duplicates_by_type(3, "Object", |analyzer, node_id| {
+            Some(analyzer.hash_object(node_id))
+        })
+    }
+
+    fn find_duplicates_by_type<F>(&self, node_type: u8, type_name: &str, hash_fn: F) -> Vec<DuplicateGroup>
+    where
+        F: Fn(&Self, NodeId) -> Option<u64>,
+    {
         let mut hash_map: AHashMap<u64, Vec<NodeId>> = AHashMap::new();
         
         for node_id in 0..self.graph.node_count() as NodeId {
-            let node_type = self.graph.node_type(node_id).unwrap();
-            
-            // Type 2 is typically string in V8
-            if node_type == 2 {
-                if let Some(name) = self.graph.node_name(node_id) {
-                    let hash = self.hash_string(name);
+            if self.graph.node_type(node_id).unwrap() == node_type {
+                if let Some(hash) = hash_fn(self, node_id) {
                     hash_map.entry(hash).or_default().push(node_id);
                 }
             }
         }
         
-        self.create_groups(hash_map, "String")
-    }
-
-    pub fn find_duplicate_objects(&self) -> Vec<DuplicateGroup> {
-        let mut hash_map: AHashMap<u64, Vec<NodeId>> = AHashMap::new();
-        
-        for node_id in 0..self.graph.node_count() as NodeId {
-            let node_type = self.graph.node_type(node_id).unwrap();
-            
-            // Type 3 is typically object in V8
-            if node_type == 3 {
-                let hash = self.hash_object(node_id);
-                hash_map.entry(hash).or_default().push(node_id);
-            }
-        }
-        
-        self.create_groups(hash_map, "Object")
+        self.create_groups(hash_map, type_name)
     }
 
     fn hash_string(&self, s: &str) -> u64 {
