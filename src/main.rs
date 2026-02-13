@@ -52,8 +52,11 @@ fn main() -> Result<()> {
     let (metadata, string_table) = parser.parse_metadata_and_strings()?;
     let string_table = Arc::new(string_table);
     
-    println!("  Nodes: {}", metadata.node_count);
-    println!("  Edges: {}", metadata.edge_count);
+    // Get actual counts from the data
+    let (node_count, edge_count) = parser.get_actual_counts(&metadata)?;
+    
+    println!("  Nodes: {}", node_count);
+    println!("  Edges: {}", edge_count);
     println!("  Strings: {}", string_table.len());
     println!();
 

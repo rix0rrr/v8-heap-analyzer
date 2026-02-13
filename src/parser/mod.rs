@@ -58,6 +58,13 @@ impl SnapshotParser {
 
         Ok((snapshot.nodes, snapshot.edges))
     }
+
+    pub fn get_actual_counts(&self, metadata: &SnapshotMetadata) -> Result<(usize, usize)> {
+        let (nodes, edges) = self.parse_nodes_and_edges()?;
+        let node_count = nodes.len() / metadata.node_field_count();
+        let edge_count = edges.len() / metadata.edge_field_count();
+        Ok((node_count, edge_count))
+    }
 }
 
 pub struct DecodedNode {
