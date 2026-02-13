@@ -1,0 +1,214 @@
+V8 Heap Snapshot Analysis
+==========================
+
+Summary:
+- Total Objects: 50189
+- Duplicate Groups Found: 182
+- Total Wasted Memory: 615048 bytes
+
+Top 10 Duplicate Groups (by memory impact):
+-------------------------------------------
+
+1. // Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWI
+   Count: 16 duplicates
+   Size: 35176 bytes each
+   Total Wasted: 527640 bytes
+   Retention Path:
+      (External strings)
+        .19
+        // Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWI
+
+2. xxxx
+   Count: 1000 duplicates
+   Size: 24 bytes each
+   Total Wasted: 23976 bytes
+   Retention Path:
+      (Stack roots)
+        .30
+        Array
+          .iso8601
+          (concatenated string)
+            .first
+            (concatenated string)
+              .first
+              xxxx
+
+3. xxxxxxxx
+   Count: 1000 duplicates
+   Size: 24 bytes each
+   Total Wasted: 23976 bytes
+   Retention Path:
+      (Stack roots)
+        .30
+        Array
+          .isoDay
+          (concatenated string)
+            .first
+            (concatenated string)
+              .second
+              (concatenated string)
+                .first
+                (concatenated string)
+                  .first
+                  xxxxxxxx
+
+4. Object
+   Count: 284 duplicates
+   Size: 56 bytes each
+   Total Wasted: 15848 bytes
+   Retention Path:
+      (Stack roots)
+        .41
+        Object
+
+5. get [kIsNodeError]
+   Count: 288 duplicates
+   Size: 40 bytes each
+   Total Wasted: 11480 bytes
+   Retention Path:
+      system / AccessorPair
+        .getter
+        
+          .name
+          get [kIsNodeError]
+
+6. system / Context
+   Count: 20 duplicates
+   Size: 40 bytes each
+   Total Wasted: 760 bytes
+   Retention Path:
+      system / AccessorPair
+        .getter
+        get
+          .context
+          system / Context
+
+7. system / Context
+   Count: 19 duplicates
+   Size: 40 bytes each
+   Total Wasted: 720 bytes
+   Retention Path:
+      system / AccessorPair
+        .getter
+        get
+          .context
+          system / Context
+
+8. [nodejs.util.inspect.custom]
+   Count: 13 duplicates
+   Size: 48 bytes each
+   Total Wasted: 576 bytes
+   Retention Path:
+      system / AccessorPair
+        .getter
+        get encoding
+          .context
+          system / Context
+            .<dummy>
+            TextEncoder
+              .prototype
+              TextEncoder
+                .<symbol nodejs.util.inspect.custom>
+                
+                  .name
+                  [nodejs.util.inspect.custom]
+
+9. Array
+   Count: 18 duplicates
+   Size: 32 bytes each
+   Total Wasted: 544 bytes
+   Retention Path:
+      (Global handles)
+        .20
+        process
+          .execArgv
+          Array
+
+10. FinalizationRegistry
+   Count: 4 duplicates
+   Size: 160 bytes each
+   Total Wasted: 480 bytes
+   Retention Path:
+      system / WeakCell
+        .<dummy>
+        FinalizationRegistry
+
+Top 10 Object Types by Hidden Class Memory:
+--------------------------------------------
+
+1. system / ScopeInfo
+   Hidden Classes: 474
+   Total Memory: 84304 bytes
+
+2. system / BytecodeArray
+   Hidden Classes: 319
+   Total Memory: 53528 bytes
+
+3. (context local names)
+   Hidden Classes: 12
+   Total Memory: 51680 bytes
+
+4. system / FeedbackCell
+   Hidden Classes: 2127
+   Total Memory: 51024 bytes
+
+5. system / UncompiledDataWithoutPreparseData
+   Hidden Classes: 1750
+   Total Memory: 42000 bytes
+
+6. system / TrustedByteArray
+   Hidden Classes: 439
+   Total Memory: 27248 bytes
+
+7. (shared function info)
+   Hidden Classes: 394
+   Total Memory: 25344 bytes
+
+8. system / WeakFixedArray
+   Hidden Classes: 108
+   Total Memory: 23936 bytes
+
+9. (constant pool)
+   Hidden Classes: 293
+   Total Memory: 22568 bytes
+
+10. system / FeedbackMetadata
+   Hidden Classes: 305
+   Total Memory: 9864 bytes
+
