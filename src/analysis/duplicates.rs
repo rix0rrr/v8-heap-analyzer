@@ -5,6 +5,20 @@ use serde::Serialize;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+fn escape_string(s: &str) -> String {
+    s.chars()
+        .flat_map(|c| match c {
+            '\n' => vec!['\\', 'n'],
+            '\r' => vec!['\\', 'r'],
+            '\t' => vec!['\\', 't'],
+            '\\' => vec!['\\', '\\'],
+            '"' => vec!['\\', '"'],
+            c if c.is_control() => format!("\\u{:04x}", c as u32).chars().collect(),
+            c => vec![c],
+        })
+        .collect()
+}
+
 pub struct DuplicateAnalyzer {
     graph: CompactGraph,
     include_hidden_classes: bool,
@@ -140,12 +154,13 @@ impl DuplicateAnalyzer {
         // For strings, return the string value
         if node_type == 2 {
             return self.graph.node_name(node_id).map(|s| {
-                if s.len() > 100 {
+                let escaped = escape_string(s);
+                if escaped.len() > 100 {
                     // Truncate at char boundary, not byte boundary
-                    let truncated: String = s.chars().take(100).collect();
+                    let truncated: String = escaped.chars().take(100).collect();
                     format!("\"{}...\"", truncated)
                 } else {
-                    format!("\"{}\"", s)
+                    format!("\"{}\"", escaped)
                 }
             });
         }
@@ -183,9 +198,14 @@ impl DuplicateAnalyzer {
                 let count = node_ids.len();
                 let total_wasted = (count - 1) as u64 * size;
                 
-                let object_type = self.graph.node_name(representative)
-                    .unwrap_or(type_name)
-                    .to_string();
+                // For strings, use "String" as the type name, not the actual string value
+                let object_type = if type_name == "String" {
+                    "String".to_string()
+                } else {
+                    self.graph.node_name(representative)
+                        .unwrap_or(type_name)
+                        .to_string()
+                };
                 
                 let sample_value = self.get_sample_value(representative);
                 
@@ -239,10 +259,10 @@ mod tests {
         
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].count, 2);
-        assert_eq!(groups[0].object_type, "duplicate");
+        assert_eq!(groups[0].object_type, "String"); // Changed: now uses "String" as caption
         assert_eq!(groups[0].total_wasted, 48);
         assert!(groups[0].sample_value.is_some());
-        assert!(groups[0].sample_value.as_ref().unwrap().contains("duplicate"));
+        assert!(groups[0].sample_value.as_ref().unwrap().contains("duplicate")); // Actual value in sample
     }
 
     #[test]
@@ -281,5 +301,72 @@ mod tests {
         // Calculate size of parent (should be shallow size only)
         let size = analyzer.calculate_total_size(0);
         assert_eq!(size, 100, "Should return shallow size of parent object");
+    }
+
+    #[test]
+    fn test_multiple_retention_paths() {
+        use crate::paths::RetentionPathFinder;
+        
+        let strings = vec![
+            "".to_string(),
+            "root1".to_string(),
+            "root2".to_string(),
+            "target".to_string(),
+            "prop".to_string(),
+        ];
+        let string_table = Arc::new(StringTable::new(strings));
+        
+        let mut graph = CompactGraph::new(string_table);
+        
+        // Node 0: root1 (GC root)
+        graph.node_types.push(3);
+        graph.node_names.push(1);
+        graph.node_ids.push(1);
+        graph.node_sizes.push(100);
+        graph.node_edge_ranges.push((0, 1)); // 1 edge
+        graph.gc_roots.push(0);
+        
+        // Node 1: root2 (GC root)
+        graph.node_types.push(3);
+        graph.node_names.push(2);
+        graph.node_ids.push(2);
+        graph.node_sizes.push(100);
+        graph.node_edge_ranges.push((1, 2)); // 1 edge
+        graph.gc_roots.push(1);
+        
+        // Node 2: target (reachable from both roots)
+        graph.node_types.push(3);
+        graph.node_names.push(3);
+        graph.node_ids.push(3);
+        graph.node_sizes.push(50);
+        graph.node_edge_ranges.push((2, 2)); // 0 edges
+        
+        // Edge from root1 to target
+        graph.edge_types.push(2);
+        graph.edge_names.push(4);
+        graph.edge_targets.push(2);
+        
+        // Edge from root2 to target
+        graph.edge_types.push(2);
+        graph.edge_names.push(4);
+        graph.edge_targets.push(2);
+        
+        let finder = RetentionPathFinder::new(&graph);
+        let paths = finder.find_paths(2, 10); // Find up to 10 paths
+        
+        // Should find 2 paths (one from each root)
+        assert!(paths.len() >= 2, "Expected at least 2 retention paths, found {}", paths.len());
+        
+        // Verify both paths lead to the target
+        for path in &paths {
+            assert_eq!(*path.nodes.last().unwrap(), 2, "Path should end at target node");
+            assert!(graph.is_gc_root(path.nodes[0]), "Path should start from GC root");
+        }
+        
+        // Verify we have paths from different roots
+        let root_nodes: std::collections::HashSet<_> = paths.iter()
+            .map(|p| p.nodes[0])
+            .collect();
+        assert_eq!(root_nodes.len(), 2, "Should have paths from 2 different GC roots");
     }
 }

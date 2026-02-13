@@ -26,9 +26,9 @@ struct Cli {
     #[arg(short, long)]
     input: PathBuf,
 
-    /// Output report file
+    /// Output report file (defaults to stdout)
     #[arg(short, long)]
-    output: PathBuf,
+    output: Option<PathBuf>,
 
     /// Output format (text or json)
     #[arg(short, long, default_value = "text")]
@@ -103,15 +103,27 @@ fn main() -> Result<()> {
     println!("Generating report...");
     let generator = ReportGenerator::new(&graph, duplicate_groups, hidden_class_groups, retention_paths);
     
-    let mut output_file = File::create(&cli.output)
-        .context("Failed to create output file")?;
-    
-    match cli.format.as_str() {
-        "json" => generator.generate_json_report(&mut output_file, 50)?,
-        _ => generator.generate_text_report(&mut output_file, 10)?,
+    if let Some(output_path) = &cli.output {
+        let mut output_file = File::create(output_path)
+            .context("Failed to create output file")?;
+        
+        match cli.format.as_str() {
+            "json" => generator.generate_json_report(&mut output_file, 50)?,
+            _ => generator.generate_text_report(&mut output_file, 10)?,
+        }
+        
+        println!("Report written to: {}", output_path.display());
+    } else {
+        // Write to stdout
+        let stdout = std::io::stdout();
+        let mut handle = stdout.lock();
+        
+        match cli.format.as_str() {
+            "json" => generator.generate_json_report(&mut handle, 50)?,
+            _ => generator.generate_text_report(&mut handle, 10)?,
+        }
     }
     
-    println!("Report written to: {}", cli.output.display());
     println!("Done!");
 
     Ok(())

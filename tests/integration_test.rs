@@ -111,3 +111,46 @@ fn test_unicode_strings_no_crash() {
     
     println!("✓ Successfully analyzed snapshot with unicode strings");
 }
+
+#[test]
+fn test_multiple_retention_paths_from_js() {
+    let snapshot_path = PathBuf::from("tests/fixtures/test-multiple-paths.heapsnapshot");
+    
+    if !snapshot_path.exists() {
+        panic!("Test snapshot not found. Run: node tests/generate-multiple-paths.js");
+    }
+    
+    // Analyze snapshot
+    let results = analyze_snapshot(&snapshot_path, false)
+        .expect("Failed to analyze snapshot");
+    
+    // The shared object should appear in retention paths
+    // Look for objects that have multiple retention paths
+    let objects_with_multiple_paths = results.retention_paths.iter()
+        .filter(|(_, paths)| paths.len() >= 2)
+        .count();
+    
+    assert!(objects_with_multiple_paths > 0, 
+        "Expected to find at least one object with multiple retention paths, found none"
+    );
+    
+    println!("✓ Found {} objects with multiple retention paths", objects_with_multiple_paths);
+    
+    // Verify the paths are actually different (start from different roots)
+    for (node_id, paths) in results.retention_paths.iter() {
+        if paths.len() >= 2 {
+            let root_nodes: std::collections::HashSet<_> = paths.iter()
+                .map(|p| p.nodes[0])
+                .collect();
+            
+            assert!(root_nodes.len() >= 2, 
+                "Object {} has {} paths but they start from the same root", 
+                node_id, paths.len()
+            );
+            
+            println!("✓ Object {} has {} paths from {} different GC roots", 
+                node_id, paths.len(), root_nodes.len());
+            break; // Just verify one object
+        }
+    }
+}

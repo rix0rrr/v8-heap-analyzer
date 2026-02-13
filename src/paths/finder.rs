@@ -21,35 +21,42 @@ impl<'a> RetentionPathFinder<'a> {
 
     pub fn find_paths(&self, target: NodeId, max_paths: usize) -> Vec<RetentionPath> {
         let mut paths = Vec::new();
-        let mut visited = HashMap::new();
-        let mut queue = VecDeque::new();
         
-        // Start from all GC roots
+        // Try BFS from each GC root separately to find multiple paths
         for &root in self.graph.gc_roots() {
-            queue.push_back(root);
-            visited.insert(root, (None, 0u8, String::new()));
-        }
-        
-        // BFS to find paths
-        while let Some(current) = queue.pop_front() {
-            if current == target {
-                // Found target, reconstruct path
-                let path = self.reconstruct_path(&visited, target);
-                paths.push(path);
-                
-                if paths.len() >= max_paths {
-                    break;
-                }
-                continue;
+            if paths.len() >= max_paths {
+                break;
             }
             
-            // Explore edges
-            for edge in self.graph.edges(current) {
-                if !visited.contains_key(&edge.target) {
-                    let edge_name = edge.name().unwrap_or("").to_string();
-                    visited.insert(edge.target, (Some(current), edge.edge_type, edge_name));
-                    queue.push_back(edge.target);
+            let mut visited = HashMap::new();
+            let mut queue = VecDeque::new();
+            
+            queue.push_back(root);
+            visited.insert(root, (None, 0u8, String::new()));
+            
+            // BFS from this root
+            let mut found = false;
+            while let Some(current) = queue.pop_front() {
+                if current == target {
+                    // Found target, reconstruct path
+                    let path = self.reconstruct_path(&visited, target);
+                    paths.push(path);
+                    found = true;
+                    break;
                 }
+                
+                // Explore edges
+                for edge in self.graph.edges(current) {
+                    if !visited.contains_key(&edge.target) {
+                        let edge_name = edge.name().unwrap_or("").to_string();
+                        visited.insert(edge.target, (Some(current), edge.edge_type, edge_name));
+                        queue.push_back(edge.target);
+                    }
+                }
+            }
+            
+            if found && paths.len() >= max_paths {
+                break;
             }
         }
         

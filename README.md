@@ -24,8 +24,11 @@ The binary will be available at `target/release/v8-heap-analyzer`.
 ### Basic Usage
 
 ```bash
-# Generate text report
+# Generate text report to file
 v8-heap-analyzer -i snapshot.heapsnapshot -o report.txt
+
+# Generate text report to stdout
+v8-heap-analyzer -i snapshot.heapsnapshot
 
 # Generate JSON report
 v8-heap-analyzer -i snapshot.heapsnapshot -o report.json --format json
@@ -34,7 +37,7 @@ v8-heap-analyzer -i snapshot.heapsnapshot -o report.json --format json
 ### Options
 
 - `-i, --input <FILE>`: Input heap snapshot file (required)
-- `-o, --output <FILE>`: Output report file (required)
+- `-o, --output <FILE>`: Output report file (optional, defaults to stdout)
 - `-f, --format <FORMAT>`: Output format: `text` or `json` (default: `text`)
 - `--include-hidden-classes`: Include hidden classes in duplicate detection
 

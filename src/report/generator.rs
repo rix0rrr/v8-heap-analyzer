@@ -121,11 +121,37 @@ impl<'a> ReportGenerator<'a> {
             writeln!(output, "     {} {}", "  ".repeat(i), name)?;
             
             if i < path.edge_names.len() {
-                writeln!(output, "     {}   .{}", "  ".repeat(i), path.edge_names[i])?;
+                let formatted_edge = self.format_edge_name(&path.edge_names[i]);
+                writeln!(output, "     {}   .{}", "  ".repeat(i), formatted_edge)?;
             }
         }
         Ok(())
     }
+
+    fn format_edge_name(&self, edge_name: &str) -> String {
+        // Check if it looks like a string value (not a property name)
+        // Property names are typically alphanumeric identifiers
+        if edge_name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$') {
+            edge_name.to_string()
+        } else {
+            // Format as escaped string
+            format!("\"{}\"", escape_string(edge_name))
+        }
+    }
+}
+
+fn escape_string(s: &str) -> String {
+    s.chars()
+        .flat_map(|c| match c {
+            '\n' => vec!['\\', 'n'],
+            '\r' => vec!['\\', 'r'],
+            '\t' => vec!['\\', 't'],
+            '\\' => vec!['\\', '\\'],
+            '"' => vec!['\\', '"'],
+            c if c.is_control() => format!("\\u{:04x}", c as u32).chars().collect(),
+            c => vec![c],
+        })
+        .collect()
 }
 
 #[derive(Serialize)]
