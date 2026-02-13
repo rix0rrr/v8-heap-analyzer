@@ -131,6 +131,7 @@ cargo test
 # Generate test snapshots
 node tests/generate-snapshot.js
 node tests/generate-string-duplicates.js
+node tests/generate-object-duplicates.js
 
 # Analyze test snapshot
 ./target/release/v8-heap-analyzer \
@@ -141,10 +142,10 @@ node tests/generate-string-duplicates.js
 ### Test Coverage
 
 - **15 unit tests**: Core functionality (parser, graph, analysis, paths, reports)
-- **1 integration test**: End-to-end validation with real heap snapshot
-  - Generates 1000 duplicate strings using `'x'.repeat(100)`
-  - Verifies analyzer finds exactly 1000 duplicates
-  - Validates memory waste calculation
+- **2 integration tests**: End-to-end validation with real heap snapshots
+  - **String duplicates**: Generates 1000 duplicate strings using `'x'.repeat(100)`, verifies analyzer finds exactly 1000 duplicates
+  - **Object duplicates**: Generates 1000 duplicate complex objects with nested structures (8 top-level keys, multiple nested objects), verifies analyzer finds all duplicate objects including nested ones
+  - Validates memory waste calculation and retention paths
 
 ## Performance
 

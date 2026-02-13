@@ -78,3 +78,74 @@ fn test_find_string_duplicates_in_snapshot() {
     // Cleanup
     let _ = std::fs::remove_file(output_path);
 }
+
+#[test]
+fn test_find_object_duplicates_in_snapshot() {
+    // Path to test snapshot
+    let snapshot_path = PathBuf::from("tests/fixtures/test-object-duplicates.heapsnapshot");
+    
+    if !snapshot_path.exists() {
+        panic!("Test snapshot not found. Run: node tests/generate-object-duplicates.js");
+    }
+    
+    // Run analyzer
+    let output_path = PathBuf::from("tests/fixtures/test-object-output.json");
+    let output = Command::new("cargo")
+        .args(&[
+            "run",
+            "--release",
+            "--",
+            "-i",
+            snapshot_path.to_str().unwrap(),
+            "-o",
+            output_path.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("Failed to run analyzer");
+    
+    assert!(output.status.success(), "Analyzer failed: {:?}", String::from_utf8_lossy(&output.stderr));
+    
+    // Read and parse JSON output
+    let report_json = std::fs::read_to_string(&output_path)
+        .expect("Failed to read output file");
+    
+    let report: serde_json::Value = serde_json::from_str(&report_json)
+        .expect("Failed to parse JSON");
+    
+    // Verify we found duplicate groups
+    let duplicate_groups = report["duplicate_groups"].as_array()
+        .expect("No duplicate_groups in report");
+    
+    assert!(!duplicate_groups.is_empty(), "No duplicate groups found");
+    
+    // Find groups with 1001 duplicates (1000 + 1 original)
+    // Should find multiple: main object + nested objects
+    let groups_with_1001 = duplicate_groups.iter()
+        .filter(|group| group["count"].as_u64() == Some(1001))
+        .count();
+    
+    assert!(groups_with_1001 >= 3, 
+        "Expected at least 3 groups with 1001 duplicates (main + nested objects), found {}", 
+        groups_with_1001
+    );
+    
+    println!("✓ Found {} groups with 1001 duplicates (complex objects with nesting)", groups_with_1001);
+    
+    // Verify total wasted memory is significant
+    let total_wasted: u64 = duplicate_groups.iter()
+        .filter(|group| group["count"].as_u64() == Some(1001))
+        .filter_map(|group| group["total_wasted"].as_u64())
+        .sum();
+    
+    assert!(total_wasted > 100000, 
+        "Expected significant memory waste from objects, found {} bytes", 
+        total_wasted
+    );
+    
+    println!("✓ Total wasted memory from duplicate objects: {} bytes", total_wasted);
+    
+    // Cleanup
+    let _ = std::fs::remove_file(output_path);
+}

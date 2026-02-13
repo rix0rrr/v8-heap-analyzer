@@ -1,6 +1,6 @@
 use crate::graph::CompactGraph;
 use crate::types::NodeId;
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet};
 use serde::Serialize;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -15,10 +15,12 @@ pub struct DuplicateGroup {
     pub hash: u64,
     pub object_type: String,
     pub count: usize,
-    pub size_per_object: u32,
+    pub size_per_object: u64,  // Changed to u64 for total size
     pub total_wasted: u64,
     pub representative: NodeId,
     pub node_ids: Vec<NodeId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sample_value: Option<String>,
 }
 
 impl DuplicateAnalyzer {
@@ -106,19 +108,82 @@ impl DuplicateAnalyzer {
         hasher.finish()
     }
 
+    fn calculate_total_size(&self, node_id: NodeId) -> u64 {
+        let mut visited = AHashSet::new();
+        self.calculate_size_recursive(node_id, &mut visited)
+    }
+
+    fn calculate_size_recursive(&self, node_id: NodeId, visited: &mut AHashSet<NodeId>) -> u64 {
+        if visited.contains(&node_id) {
+            return 0; // Already counted or circular reference
+        }
+        visited.insert(node_id);
+        
+        let mut total = self.graph.node_size(node_id).unwrap_or(0) as u64;
+        
+        // Add sizes of all referenced objects
+        for edge in self.graph.edges(node_id) {
+            if !self.include_hidden_classes && edge.edge_type == 4 {
+                continue; // Skip hidden edges
+            }
+            total += self.calculate_size_recursive(edge.target, visited);
+        }
+        
+        total
+    }
+
+    fn get_sample_value(&self, node_id: NodeId) -> Option<String> {
+        let node_type = self.graph.node_type(node_id)?;
+        
+        // For strings, return the string value
+        if node_type == 2 {
+            return self.graph.node_name(node_id).map(|s| {
+                if s.len() > 100 {
+                    format!("\"{}...\"", &s[..100])
+                } else {
+                    format!("\"{}\"", s)
+                }
+            });
+        }
+        
+        // For objects, show structure
+        if node_type == 3 {
+            let mut parts = Vec::new();
+            let edges: Vec<_> = self.graph.edges(node_id).take(5).collect();
+            
+            for edge in edges {
+                if let Some(name) = edge.name() {
+                    if let Some(target_name) = self.graph.node_name(edge.target) {
+                        parts.push(format!("{}: {}", name, target_name));
+                    }
+                }
+            }
+            
+            if parts.is_empty() {
+                return Some("{}".to_string());
+            }
+            
+            return Some(format!("{{ {} }}", parts.join(", ")));
+        }
+        
+        None
+    }
+
     fn create_groups(&self, hash_map: AHashMap<u64, Vec<NodeId>>, type_name: &str) -> Vec<DuplicateGroup> {
         let mut groups = Vec::new();
         
         for (hash, node_ids) in hash_map {
             if node_ids.len() > 1 {
                 let representative = node_ids[0];
-                let size = self.graph.node_size(representative).unwrap_or(0);
+                let size = self.calculate_total_size(representative);
                 let count = node_ids.len();
-                let total_wasted = (count - 1) as u64 * size as u64;
+                let total_wasted = (count - 1) as u64 * size;
                 
                 let object_type = self.graph.node_name(representative)
                     .unwrap_or(type_name)
                     .to_string();
+                
+                let sample_value = self.get_sample_value(representative);
                 
                 groups.push(DuplicateGroup {
                     hash,
@@ -128,6 +193,7 @@ impl DuplicateAnalyzer {
                     total_wasted,
                     representative,
                     node_ids,
+                    sample_value,
                 });
             }
         }
@@ -171,5 +237,45 @@ mod tests {
         assert_eq!(groups[0].count, 2);
         assert_eq!(groups[0].object_type, "duplicate");
         assert_eq!(groups[0].total_wasted, 48);
+        assert!(groups[0].sample_value.is_some());
+        assert!(groups[0].sample_value.as_ref().unwrap().contains("duplicate"));
+    }
+
+    #[test]
+    fn test_nested_object_size_calculation() {
+        let strings = vec![
+            "".to_string(),
+            "parent".to_string(),
+            "child".to_string(),
+            "prop".to_string(),
+        ];
+        let string_table = Arc::new(StringTable::new(strings));
+        
+        let mut graph = CompactGraph::new(string_table);
+        
+        // Add parent object (node 0) with size 100
+        graph.node_types.push(3); // object
+        graph.node_names.push(1); // "parent"
+        graph.node_ids.push(1);
+        graph.node_sizes.push(100);
+        graph.node_edge_ranges.push((0, 1)); // 1 edge
+        
+        // Add child object (node 1) with size 50
+        graph.node_types.push(3); // object
+        graph.node_names.push(2); // "child"
+        graph.node_ids.push(2);
+        graph.node_sizes.push(50);
+        graph.node_edge_ranges.push((1, 1)); // 0 edges
+        
+        // Add edge from parent to child
+        graph.edge_types.push(2); // property
+        graph.edge_names.push(3); // "prop"
+        graph.edge_targets.push(1); // target node 1
+        
+        let analyzer = DuplicateAnalyzer::new(graph, false);
+        
+        // Calculate total size of parent (should include child)
+        let total_size = analyzer.calculate_total_size(0);
+        assert_eq!(total_size, 150, "Total size should be parent (100) + child (50)");
     }
 }

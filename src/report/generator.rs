@@ -15,6 +15,22 @@ pub struct ReportGenerator<'a> {
     retention_paths: HashMap<NodeId, Vec<RetentionPath>>,
 }
 
+fn format_bytes(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    
+    if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.2} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.2} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} bytes", bytes)
+    }
+}
+
 impl<'a> ReportGenerator<'a> {
     pub fn new(
         graph: &'a CompactGraph,
@@ -42,7 +58,7 @@ impl<'a> ReportGenerator<'a> {
         writeln!(output, "Summary:")?;
         writeln!(output, "- Total Objects: {}", total_objects)?;
         writeln!(output, "- Duplicate Groups Found: {}", self.duplicate_groups.len())?;
-        writeln!(output, "- Total Wasted Memory: {} bytes", total_wasted)?;
+        writeln!(output, "- Total Wasted Memory: {}", format_bytes(total_wasted))?;
         writeln!(output)?;
         
         // Top N duplicate groups
@@ -53,8 +69,12 @@ impl<'a> ReportGenerator<'a> {
         for (i, group) in self.duplicate_groups.iter().take(top_n).enumerate() {
             writeln!(output, "{}. {}", i + 1, group.object_type)?;
             writeln!(output, "   Count: {} duplicates", group.count)?;
-            writeln!(output, "   Size: {} bytes each", group.size_per_object)?;
-            writeln!(output, "   Total Wasted: {} bytes", group.total_wasted)?;
+            writeln!(output, "   Size: {} each", format_bytes(group.size_per_object))?;
+            writeln!(output, "   Total Wasted: {}", format_bytes(group.total_wasted))?;
+            
+            if let Some(ref sample) = group.sample_value {
+                writeln!(output, "   Sample Value: {}", sample)?;
+            }
             
             if let Some(paths) = self.retention_paths.get(&group.representative) {
                 if let Some(path) = paths.first() {
@@ -73,7 +93,7 @@ impl<'a> ReportGenerator<'a> {
         for (i, group) in self.hidden_class_groups.iter().take(top_n).enumerate() {
             writeln!(output, "{}. {}", i + 1, group.object_type)?;
             writeln!(output, "   Hidden Classes: {}", group.hidden_class_count)?;
-            writeln!(output, "   Total Memory: {} bytes", group.total_hidden_class_memory)?;
+            writeln!(output, "   Total Memory: {}", format_bytes(group.total_hidden_class_memory))?;
             writeln!(output)?;
         }
         
@@ -129,6 +149,15 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn test_format_bytes() {
+        assert_eq!(format_bytes(500), "500 bytes");
+        assert_eq!(format_bytes(1024), "1.00 KB");
+        assert_eq!(format_bytes(1536), "1.50 KB");
+        assert_eq!(format_bytes(1048576), "1.00 MB");
+        assert_eq!(format_bytes(1073741824), "1.00 GB");
+    }
+
+    #[test]
     fn test_generate_text_report() {
         let strings = vec!["".to_string(), "test".to_string()];
         let string_table = Arc::new(StringTable::new(strings));
@@ -142,6 +171,7 @@ mod tests {
             total_wasted: 432,
             representative: 0,
             node_ids: vec![0, 1, 2],
+            sample_value: Some("\"test\"".to_string()),
         }];
         
         let generator = ReportGenerator::new(&graph, groups, vec![], HashMap::new());
@@ -152,5 +182,6 @@ mod tests {
         assert!(report.contains("V8 Heap Snapshot Analysis"));
         assert!(report.contains("String"));
         assert!(report.contains("432 bytes"));
+        assert!(report.contains("Sample Value: \"test\""));
     }
 }
