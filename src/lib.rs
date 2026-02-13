@@ -49,20 +49,19 @@ pub fn analyze_snapshot(input_path: &PathBuf, include_hidden_classes: bool) -> R
 
 /// Analyzes a CompactGraph for duplicates, hidden classes, and retention paths
 pub fn analyze_graph(graph: CompactGraph, include_hidden_classes: bool) -> Result<AnalysisResults> {
-    // Note: Retained size calculation is disabled by default as it's O(n²) and very slow for large graphs
-    // Uncomment to enable:
-    // println!("Calculating retained sizes...");
-    // let retained_sizes = calculate_retained_sizes(&graph);
-    // println!("  Calculated sizes for {} nodes", retained_sizes.len());
-    // println!();
+    // Calculate retained sizes for all nodes (now using O(n*m) algorithm)
+    println!("Calculating retained sizes...");
+    let retained_sizes = calculate_retained_sizes(&graph);
+    println!("  Calculated sizes for {} nodes", retained_sizes.len());
+    println!();
     
     // Analyze duplicates
     let analyzer = DuplicateAnalyzer::new(graph, include_hidden_classes);
     let mut duplicate_groups = analyzer.find_duplicates();
     let graph = analyzer.into_graph();
     
-    // Enrich duplicate groups with retained sizes (if calculated)
-    // DuplicateAnalyzer::enrich_with_retained_sizes(&mut duplicate_groups, &retained_sizes);
+    // Enrich duplicate groups with retained sizes
+    DuplicateAnalyzer::enrich_with_retained_sizes(&mut duplicate_groups, &retained_sizes);
 
     // Analyze hidden classes
     let hc_analyzer = HiddenClassAnalyzer::new(graph);

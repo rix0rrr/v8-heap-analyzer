@@ -70,11 +70,21 @@ fn main() -> Result<()> {
     let graph = builder.finalize();
     println!();
 
+    // Calculate retained sizes
+    println!("Calculating retained sizes...");
+    let retained_sizes = analysis::retained_size::calculate_retained_sizes(&graph);
+    println!("  Calculated sizes for {} nodes", retained_sizes.len());
+    println!();
+
     // Analyze duplicates
     println!("Analyzing duplicates...");
     let analyzer = DuplicateAnalyzer::new(graph, cli.include_hidden_classes);
-    let duplicate_groups = analyzer.find_duplicates();
+    let mut duplicate_groups = analyzer.find_duplicates();
     let graph = analyzer.into_graph();
+    
+    // Enrich with retained sizes
+    DuplicateAnalyzer::enrich_with_retained_sizes(&mut duplicate_groups, &retained_sizes);
+    
     println!("  Found {} duplicate groups", duplicate_groups.len());
     println!();
 
