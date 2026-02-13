@@ -141,7 +141,9 @@ impl DuplicateAnalyzer {
         if node_type == 2 {
             return self.graph.node_name(node_id).map(|s| {
                 if s.len() > 100 {
-                    format!("\"{}...\"", &s[..100])
+                    // Truncate at char boundary, not byte boundary
+                    let truncated: String = s.chars().take(100).collect();
+                    format!("\"{}...\"", truncated)
                 } else {
                     format!("\"{}\"", s)
                 }

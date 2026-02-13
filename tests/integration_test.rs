@@ -149,3 +149,47 @@ fn test_find_object_duplicates_in_snapshot() {
     // Cleanup
     let _ = std::fs::remove_file(output_path);
 }
+
+#[test]
+fn test_unicode_strings_no_crash() {
+    // Path to test snapshot with unicode
+    let snapshot_path = PathBuf::from("tests/fixtures/test-unicode-duplicates.heapsnapshot");
+    
+    if !snapshot_path.exists() {
+        panic!("Test snapshot not found. Run: node tests/generate-unicode-duplicates.js");
+    }
+    
+    // Run analyzer - should not crash on unicode
+    let output_path = PathBuf::from("tests/fixtures/test-unicode-output.txt");
+    let output = Command::new("cargo")
+        .args(&[
+            "run",
+            "--release",
+            "--",
+            "-i",
+            snapshot_path.to_str().unwrap(),
+            "-o",
+            output_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to run analyzer");
+    
+    assert!(output.status.success(), 
+        "Analyzer crashed on unicode: {:?}", 
+        String::from_utf8_lossy(&output.stderr)
+    );
+    
+    // Verify output file was created
+    assert!(output_path.exists(), "Output file was not created");
+    
+    // Read output and verify it contains valid UTF-8
+    let report = std::fs::read_to_string(&output_path)
+        .expect("Failed to read output file as UTF-8");
+    
+    assert!(report.contains("V8 Heap Snapshot Analysis"), "Report doesn't contain expected header");
+    
+    println!("✓ Successfully analyzed snapshot with unicode strings");
+    
+    // Cleanup
+    let _ = std::fs::remove_file(output_path);
+}
