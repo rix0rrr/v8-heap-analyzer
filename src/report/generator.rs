@@ -57,14 +57,25 @@ impl<'a> ReportGenerator<'a> {
             writeln!(output, "   Size: {} each", format_bytes(group.size_per_object))?;
             writeln!(output, "   Total Wasted: {}", format_bytes(group.total_wasted))?;
             
+            if let (Some(owned), Some(shared)) = (group.owned_retained_size, group.shared_retained_size) {
+                writeln!(output, "   Owned Retained: {}", format_bytes(owned))?;
+                writeln!(output, "   Shared Retained: {}", format_bytes(shared))?;
+            }
+            
             if let Some(ref sample) = group.sample_value {
                 writeln!(output, "   Sample Value: {}", sample)?;
             }
             
             if let Some(paths) = self.retention_paths.get(&group.representative) {
-                if let Some(path) = paths.first() {
+                if paths.len() == 1 {
                     writeln!(output, "   Retention Path:")?;
-                    self.format_path(output, path)?;
+                    self.format_path(output, &paths[0])?;
+                } else if paths.len() > 1 {
+                    writeln!(output, "   Retention Paths ({} found):", paths.len())?;
+                    for (idx, path) in paths.iter().enumerate() {
+                        writeln!(output, "   Path {}:", idx + 1)?;
+                        self.format_path(output, path)?;
+                    }
                 }
             }
             writeln!(output)?;
@@ -101,15 +112,24 @@ impl<'a> ReportGenerator<'a> {
     }
 
     fn format_path(&self, output: &mut dyn Write, path: &RetentionPath) -> Result<()> {
+        let mut parts = Vec::new();
+        
         for (i, &node_id) in path.nodes.iter().enumerate() {
             let name = self.graph.node_name(node_id).unwrap_or("unknown");
-            writeln!(output, "     {} {}", "  ".repeat(i), format_node_name(name))?;
+            let formatted_name = if name.len() > 50 {
+                format!("{}...", &name.chars().take(47).collect::<String>())
+            } else {
+                format_node_name(name)
+            };
+            parts.push(formatted_name);
             
             if i < path.edge_names.len() {
                 let formatted_edge = format_edge_name(&path.edge_names[i]);
-                writeln!(output, "     {}   .{}", "  ".repeat(i), formatted_edge)?;
+                parts.push(format!(".{}", formatted_edge));
             }
         }
+        
+        writeln!(output, "     {}", parts.join(" → "))?;
         Ok(())
     }
 }
@@ -150,6 +170,8 @@ mod tests {
             representative: 0,
             node_ids: vec![0, 1, 2],
             sample_value: Some("\"test\"".to_string()),
+            owned_retained_size: None,
+            shared_retained_size: None,
         }];
         
         let generator = ReportGenerator::new(&graph, groups, vec![], HashMap::new());

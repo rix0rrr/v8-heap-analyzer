@@ -1,9 +1,11 @@
 use crate::graph::CompactGraph;
 use crate::types::NodeId;
 use crate::utils::escape_string;
+use crate::analysis::retained_size::{calculate_retained_sizes, RetainedSize};
 use ahash::{AHashMap, AHashSet};
 use serde::Serialize;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 pub struct DuplicateAnalyzer {
@@ -16,12 +18,16 @@ pub struct DuplicateGroup {
     pub hash: u64,
     pub object_type: String,
     pub count: usize,
-    pub size_per_object: u64,  // Changed to u64 for total size
+    pub size_per_object: u64,
     pub total_wasted: u64,
     pub representative: NodeId,
     pub node_ids: Vec<NodeId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sample_value: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owned_retained_size: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shared_retained_size: Option<u64>,
 }
 
 impl DuplicateAnalyzer {
@@ -42,6 +48,16 @@ impl DuplicateAnalyzer {
         all_groups.sort_by(|a, b| b.total_wasted.cmp(&a.total_wasted));
         
         all_groups
+    }
+
+    /// Enriches duplicate groups with retained size information
+    pub fn enrich_with_retained_sizes(groups: &mut [DuplicateGroup], retained_sizes: &HashMap<NodeId, RetainedSize>) {
+        for group in groups {
+            if let Some(size) = retained_sizes.get(&group.representative) {
+                group.owned_retained_size = Some(size.owned);
+                group.shared_retained_size = Some(size.shared);
+            }
+        }
     }
 
     pub fn find_duplicate_strings(&self) -> Vec<DuplicateGroup> {
@@ -201,6 +217,8 @@ impl DuplicateAnalyzer {
                     representative,
                     node_ids,
                     sample_value,
+                    owned_retained_size: None,
+                    shared_retained_size: None,
                 });
             }
         }
