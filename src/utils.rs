@@ -18,7 +18,7 @@ pub fn format_bytes(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = KB * 1024;
     const GB: u64 = MB * 1024;
-    
+
     if bytes >= GB {
         format!("{:.2} GB", bytes as f64 / GB as f64)
     } else if bytes >= MB {
@@ -27,23 +27,6 @@ pub fn format_bytes(bytes: u64) -> String {
         format!("{:.2} KB", bytes as f64 / KB as f64)
     } else {
         format!("{} bytes", bytes)
-    }
-}
-
-/// Formats a node name for display (used in retention paths and reports)
-pub fn format_node_name(name: &str) -> String {
-    name.to_string()
-}
-
-/// Formats an edge name for display (quotes and escapes if needed)
-pub fn format_edge_name(edge_name: &str) -> String {
-    // Check if it looks like a string value (not a property name)
-    // Property names are typically alphanumeric identifiers
-    if edge_name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$') {
-        edge_name.to_string()
-    } else {
-        // Format as escaped string
-        format!("\"{}\"", escape_string(edge_name))
     }
 }
 

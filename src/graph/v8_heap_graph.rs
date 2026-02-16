@@ -38,20 +38,28 @@ impl V8HeapGraph {
 }
 
 impl From<SnapshotFile> for V8HeapGraph {
-    fn from(value: SnapshotFile) -> Self {
+    fn from(mut value: SnapshotFile) -> Self {
         let node_count = value.snapshot.node_count;
 
         let node_info = NodeFields::new(value.snapshot.meta.node_fields);
         let edge_info = EdgeFields::new(value.snapshot.meta.edge_fields);
 
+        // Find starting indexes into `edges` array for every node
         let mut node_edges = Vec::<usize>::with_capacity(value.nodes.len());
-
         let mut i = node_info.edge_count_field();
         let mut start: usize = 0;
         for _ in 0..node_count {
             node_edges.push(start * edge_info.stride());
             start += value.nodes[i] as usize;
             i += node_info.stride();
+        }
+
+        // The `to_node` fields in the input edges array are *indexes* into the `nodes`
+        // array, not node identifiers. Divide them all by the node stride so we don't
+        // have to do that later.
+        let node_stride = node_info.stride() as u32;
+        for i in (edge_info.to_node_field()..value.edges.len()).step_by(edge_info.stride()) {
+            value.edges[i] /= node_stride;
         }
 
         V8HeapGraph {
@@ -119,10 +127,6 @@ impl EdgeFields {
         Self {}
     }
 
-    /// The index of the to_node field
-    ///
-    /// This field represents an INDEX into the nodes array, not a Node Id. It
-    /// needs to be divided by `node_field.stride()` to get a NodeId.
     pub fn to_node_field(&self) -> usize {
         2
     }

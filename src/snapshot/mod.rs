@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::{fs::File, io::BufReader, path::Path};
 
-use serde::{Deserialize, de::Visitor};
+use serde::Deserialize;
 
 use crate::types::NodeId;
 

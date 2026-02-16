@@ -29,7 +29,6 @@ impl<'a> IntoNeighbors for &'a V8HeapGraph {
             i: self.edge_info.to_node_field(),
             edge_stride: self.edge_info.stride(),
             edges,
-            node_stride: self.node_info.stride(),
         }
     }
 }
@@ -38,7 +37,6 @@ pub struct NeighborsIter<'a> {
     edges: &'a [u32],
     i: usize,
     edge_stride: usize,
-    node_stride: usize,
 }
 
 impl<'a> Iterator for NeighborsIter<'a> {
@@ -46,7 +44,7 @@ impl<'a> Iterator for NeighborsIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.i < self.edges.len() {
-            let ret = self.edges[self.i] / self.node_stride as u32;
+            let ret = self.edges[self.i];
             self.i += self.edge_stride;
             Some(ret)
         } else {
