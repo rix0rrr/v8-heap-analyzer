@@ -41,9 +41,9 @@ impl SnapshotParser {
     pub fn parse_metadata_and_strings(&self) -> Result<(SnapshotMetadata, StringTable)> {
         let file = File::open(&self.path).context("Failed to open snapshot file")?;
         let reader = BufReader::new(file);
-        
-        let snapshot: SnapshotFile = serde_json::from_reader(reader)
-            .context("Failed to parse snapshot JSON")?;
+
+        let snapshot: SnapshotFile =
+            serde_json::from_reader(reader).context("Failed to parse snapshot JSON")?;
 
         Ok((snapshot.snapshot.meta, StringTable::new(snapshot.strings)))
     }
@@ -51,9 +51,9 @@ impl SnapshotParser {
     pub fn parse_nodes_and_edges(&self) -> Result<(Vec<u64>, Vec<u64>)> {
         let file = File::open(&self.path).context("Failed to open snapshot file")?;
         let reader = BufReader::new(file);
-        
-        let snapshot: SnapshotFile = serde_json::from_reader(reader)
-            .context("Failed to parse snapshot JSON")?;
+
+        let snapshot: SnapshotFile =
+            serde_json::from_reader(reader).context("Failed to parse snapshot JSON")?;
 
         Ok((snapshot.nodes, snapshot.edges))
     }
@@ -158,7 +158,7 @@ mod tests {
 
         let meta: SnapshotMetadata = serde_json::from_str(json).unwrap();
         let node_data = vec![3, 1, 100, 48, 2];
-        
+
         let decoded = decode_node(&node_data, &meta).unwrap();
         assert_eq!(decoded.node_type, 3);
         assert_eq!(decoded.name_idx, 1);
@@ -178,7 +178,7 @@ mod tests {
 
         let meta: SnapshotMetadata = serde_json::from_str(json).unwrap();
         let edge_data = vec![2, 5, 10];
-        
+
         let decoded = decode_edge(&edge_data, &meta).unwrap();
         assert_eq!(decoded.edge_type, 2);
         assert_eq!(decoded.name_or_index, 5);

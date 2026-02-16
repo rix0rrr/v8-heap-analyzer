@@ -1,9 +1,10 @@
-mod types;
-mod parser;
-mod graph;
 mod analysis;
+pub mod graph;
+pub mod parser;
 mod paths;
 mod report;
+mod snapshot;
+mod types;
 mod utils;
 
 use analysis::duplicates::{DuplicateAnalyzer, DuplicateGroup};
@@ -12,7 +13,7 @@ use analysis::retained_size::calculate_retained_sizes;
 use anyhow::Result;
 use graph::{CompactGraph, GraphBuilder};
 use parser::SnapshotParser;
-use paths::{RetentionPathFinder, RetentionPath};
+use paths::{RetentionPath, RetentionPathFinder};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -38,11 +39,14 @@ pub fn build_graph_from_snapshot(input_path: &PathBuf) -> Result<CompactGraph> {
     let mut builder = GraphBuilder::new(metadata, string_table);
     builder.add_nodes(&nodes)?;
     builder.add_edges(&edges)?;
-    
+
     Ok(builder.finalize())
 }
 
-pub fn analyze_snapshot(input_path: &PathBuf, include_hidden_classes: bool) -> Result<AnalysisResults> {
+pub fn analyze_snapshot(
+    input_path: &PathBuf,
+    include_hidden_classes: bool,
+) -> Result<AnalysisResults> {
     let graph = build_graph_from_snapshot(input_path)?;
     analyze_graph(graph, include_hidden_classes)
 }
@@ -54,12 +58,12 @@ pub fn analyze_graph(graph: CompactGraph, include_hidden_classes: bool) -> Resul
     let retained_sizes = calculate_retained_sizes(&graph);
     println!("  Calculated sizes for {} nodes", retained_sizes.len());
     println!();
-    
+
     // Analyze duplicates
     let analyzer = DuplicateAnalyzer::new(graph, include_hidden_classes);
     let mut duplicate_groups = analyzer.find_duplicates();
     let graph = analyzer.into_graph();
-    
+
     // Enrich duplicate groups with retained sizes
     DuplicateAnalyzer::enrich_with_retained_sizes(&mut duplicate_groups, &retained_sizes);
 
@@ -87,7 +91,7 @@ fn find_retention_paths_for_groups(
 ) -> HashMap<NodeId, Vec<RetentionPath>> {
     let path_finder = RetentionPathFinder::new(graph);
     let mut retention_paths = HashMap::new();
-    
+
     for group in duplicate_groups.iter().take(top_n) {
         let mut paths = path_finder.find_paths(group.representative, max_paths_per_group);
         if !paths.is_empty() {
@@ -95,14 +99,14 @@ fn find_retention_paths_for_groups(
             retention_paths.insert(group.representative, paths);
         }
     }
-    
+
     retention_paths
 }
 
 /// Removes paths that are entirely contained within other paths
 fn filter_subset_paths(paths: &mut Vec<RetentionPath>) {
     let mut to_remove = Vec::new();
-    
+
     for i in 0..paths.len() {
         for j in 0..paths.len() {
             if i != j && is_subset(&paths[i].nodes, &paths[j].nodes) {
@@ -111,7 +115,7 @@ fn filter_subset_paths(paths: &mut Vec<RetentionPath>) {
             }
         }
     }
-    
+
     // Remove in reverse order to maintain indices
     to_remove.sort_unstable();
     to_remove.dedup();
@@ -125,8 +129,7 @@ fn is_subset(path_a: &[NodeId], path_b: &[NodeId]) -> bool {
     if path_a.len() >= path_b.len() {
         return false;
     }
-    
+
     // Check if all nodes in path_a appear consecutively in path_b
     path_b.windows(path_a.len()).any(|window| window == path_a)
 }
-
