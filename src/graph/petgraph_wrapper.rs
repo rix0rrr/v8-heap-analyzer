@@ -1,3 +1,5 @@
+use std::iter::Copied;
+
 use fixedbitset::FixedBitSet;
 use petgraph::{
     Directed,
@@ -20,41 +22,11 @@ impl GraphBase for V8HeapGraph {
 }
 
 impl<'a> IntoNeighbors for &'a V8HeapGraph {
-    type Neighbors = NeighborsIter<'a>;
+    type Neighbors = Copied<std::slice::Iter<'a, NodeId>>;
 
     #[doc = r" Return an iterator of the neighbors of node `a`."]
     fn neighbors(self, a: Self::NodeId) -> Self::Neighbors {
-        let edges = self.edges(a);
-        NeighborsIter {
-            i: self.edge_info.to_node_field(),
-            edge_stride: self.edge_info.stride(),
-            edges,
-        }
-    }
-}
-
-pub struct NeighborsIter<'a> {
-    edges: &'a [u32],
-    i: usize,
-    edge_stride: usize,
-}
-
-impl<'a> Iterator for NeighborsIter<'a> {
-    type Item = NodeId;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.i < self.edges.len() {
-            let ret = self.edges[self.i];
-            self.i += self.edge_stride;
-            Some(ret)
-        } else {
-            None
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = (self.edges.len() + self.edge_stride - self.i) / self.edge_stride;
-        (remaining, Some(remaining))
+        self.out_edges(a).iter().copied()
     }
 }
 

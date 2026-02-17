@@ -10,6 +10,7 @@ mod utils;
 
 use anyhow::Result;
 use clap::Parser;
+use std::collections::HashMap;
 use std::io::Write;
 use std::io::stdout;
 use std::path::PathBuf;
@@ -48,7 +49,6 @@ fn main() -> Result<()> {
 
     // Full serde
     let _t = start_timer(format!("Loading {}", cli.input.display()));
-    stdout().flush()?;
     let snap = read_v8_snapshot_file(&cli.input)?;
     let graph = V8HeapGraph::from(snap);
     std::mem::drop(_t);
@@ -56,10 +56,28 @@ fn main() -> Result<()> {
     println!("Nodes: {}", graph.node_count());
     println!("Edges: {}", graph.edge_count());
 
-    let _t = start_timer("Calculating dominators".into());
-    stdout().flush()?;
+    let _t = start_timer("Calculating dominators (Lengauer Tarjan)".into());
+    let lt = analysis::lengauer_tarjan::lengauer_tarjan(&graph, &[0]);
+    std::mem::drop(_t);
+
+    let _t = start_timer("Calculating dominators (Cooper's)".into());
     let out = petgraph::algo::dominators::simple_fast(&graph, 0);
     std::mem::drop(_t);
+
+    let coop: HashMap<_, _> = graph
+        .nodes()
+        .flat_map(|i| out.immediate_dominator(i).map(|d| (i, d)))
+        .collect();
+
+    println!("Cooper's length: {}", coop.len());
+    println!("LT length: {}", lt.len());
+    for node in graph.nodes() {
+        let c = coop.get(&node);
+        let l = lt.get(&node);
+        if c != l {
+            println!("Node {} -> Cooper {:?}, LT {:?}", node, c, l);
+        }
+    }
 
     //    println!("{:?}", snap);
 

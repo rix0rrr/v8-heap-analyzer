@@ -5,72 +5,139 @@ use super::super::{snapshot::SnapshotFile, types::NodeId};
 #[derive(Debug)]
 pub struct V8HeapGraph {
     node_count: usize,
-    edge_count: usize,
     nodes: Vec<NodeId>,
-    edges: Vec<NodeId>,
+    edges: Edges,
     strings: Vec<String>,
+    pub node_fields: NodeFields,
+    pub edge_fields: EdgeFields,
+
     /// For every node, where in the "edges" array its edges start
-    node_edges: Vec<usize>,
-    pub node_info: NodeFields,
-    pub edge_info: EdgeFields,
+    node_out_edges: Vec<NodeId>,
+    node_in_edges: Vec<Vec<NodeId>>,
+}
+
+/// Edges in SoA format
+#[derive(Debug)]
+struct Edges {
+    types: Vec<NodeId>,
+    names: Vec<NodeId>,
+    to_nodes: Vec<NodeId>,
+}
+
+impl Edges {
+    pub fn new(snapshot_edges: Vec<NodeId>, edge_count: usize, node_stride: NodeId) -> Self {
+        let mut ret = Edges {
+            types: Vec::with_capacity(edge_count),
+            names: Vec::with_capacity(edge_count),
+            to_nodes: Vec::with_capacity(edge_count),
+        };
+
+        let mut i: usize = 0;
+        for _ in 0..edge_count {
+            ret.types.push(snapshot_edges[i]);
+            i += 1;
+
+            ret.names.push(snapshot_edges[i]);
+            i += 1;
+
+            // The `to_node` fields in the input edges array are *indexes* into the `nodes`
+            // array, not node identifiers. Divide them all by the node stride so we don't
+            // have to do that later.
+            ret.to_nodes.push(snapshot_edges[i] / node_stride);
+            i += 1;
+        }
+
+        ret
+    }
+
+    pub fn to1(&self, edge: usize) -> NodeId {
+        self.to_nodes[edge]
+    }
+
+    pub fn to(&self, start: usize, len: usize) -> &[NodeId] {
+        &self.to_nodes[start..start + len]
+    }
+
+    pub fn size(&self) -> usize {
+        self.types.len()
+    }
 }
 
 impl V8HeapGraph {
+    pub fn nodes(&self) -> impl Iterator<Item = NodeId> {
+        (0 as NodeId)..(self.node_count() as NodeId)
+    }
+
     pub fn node_count(&self) -> usize {
         self.node_count
     }
 
     pub fn edge_count(&self) -> usize {
-        self.edge_count
+        self.edges.size()
     }
 
     /// Edge count for a node
     pub fn edge_count_for(&self, n: NodeId) -> NodeId {
-        self.nodes[n as usize * self.node_info.stride() + self.node_info.edge_count_field()]
+        self.nodes[n as usize * self.node_fields.stride() + self.node_fields.edge_count_field()]
     }
 
-    /// All edges for a Node
-    pub fn edges(&self, node: NodeId) -> &[NodeId] {
-        let start = self.node_edges[node as usize];
-        let end = start + self.edge_count_for(node) as usize * self.edge_info.stride();
-        &self.edges[start..end]
+    /// All out edges for a Node
+    pub fn out_edges(&self, node: NodeId) -> &[NodeId] {
+        let start = self.node_out_edges[node as usize];
+        self.edges
+            .to(start as usize, self.edge_count_for(node) as usize)
+    }
+
+    /// All in edges for a Node
+    pub fn in_edges(&self, node: NodeId) -> &[NodeId] {
+        &self.node_in_edges[node as usize]
     }
 }
 
 impl From<SnapshotFile> for V8HeapGraph {
-    fn from(mut value: SnapshotFile) -> Self {
+    fn from(value: SnapshotFile) -> Self {
         let node_count = value.snapshot.node_count;
+        let node_fields = NodeFields::new(value.snapshot.meta.node_fields);
+        let edge_fields = EdgeFields::new(value.snapshot.meta.edge_fields);
 
-        let node_info = NodeFields::new(value.snapshot.meta.node_fields);
-        let edge_info = EdgeFields::new(value.snapshot.meta.edge_fields);
+        let edges = Edges::new(
+            value.edges,
+            value.snapshot.edge_count,
+            node_fields.stride() as NodeId,
+        );
 
-        // Find starting indexes into `edges` array for every node
-        let mut node_edges = Vec::<usize>::with_capacity(value.nodes.len());
-        let mut i = node_info.edge_count_field();
-        let mut start: usize = 0;
-        for _ in 0..node_count {
-            node_edges.push(start * edge_info.stride());
-            start += value.nodes[i] as usize;
-            i += node_info.stride();
-        }
+        let mut node_out_edges = Vec::<NodeId>::with_capacity(node_count);
+        let mut node_in_edges = vec![Vec::new(); node_count];
 
-        // The `to_node` fields in the input edges array are *indexes* into the `nodes`
-        // array, not node identifiers. Divide them all by the node stride so we don't
-        // have to do that later.
-        let node_stride = node_info.stride() as u32;
-        for i in (edge_info.to_node_field()..value.edges.len()).step_by(edge_info.stride()) {
-            value.edges[i] /= node_stride;
+        let edge_counts = value
+            .nodes
+            .iter()
+            .skip(node_fields.edge_count_field())
+            .step_by(node_fields.stride())
+            .copied();
+
+        let mut out_edge_index: NodeId = 0;
+        let mut edge_idx: usize = 0;
+        for (from_node, edge_count) in edge_counts.enumerate() {
+            node_out_edges.push(out_edge_index);
+            out_edge_index += edge_count;
+
+            for _ in 0..edge_count {
+                let to_node = edges.to1(edge_idx);
+                node_in_edges[to_node as usize].push(from_node as NodeId);
+                edge_idx += 1;
+            }
         }
 
         V8HeapGraph {
             node_count,
-            edge_count: value.snapshot.edge_count,
             nodes: value.nodes,
-            edges: value.edges,
+            edges,
             strings: value.strings,
-            node_edges,
-            node_info,
-            edge_info,
+            node_out_edges,
+            node_in_edges,
+            node_fields,
+            edge_fields,
         }
     }
 }
