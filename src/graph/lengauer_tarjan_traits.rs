@@ -1,6 +1,4 @@
-use crate::{analysis::lengauer_tarjan::GraphOps, graph::v8_heap_graph::V8HeapGraph};
-
-impl GraphOps for V8HeapGraph {
+impl super::lengauer_tarjan::GraphOps for super::v8_heap_graph::V8HeapGraph {
     fn node_count(&self) -> usize {
         self.node_count()
     }

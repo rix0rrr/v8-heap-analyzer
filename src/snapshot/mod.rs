@@ -7,18 +7,24 @@ use crate::types::NodeId;
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
-pub enum SnapshotType {
+pub enum StringOrStrings {
     Str(String),
     Strs(Vec<String>),
+}
+
+impl Default for StringOrStrings {
+    fn default() -> Self {
+        StringOrStrings::Str(String::new())
+    }
 }
 
 #[derive(Debug, Deserialize)]
 pub struct SnapshotMetadata {
     pub edge_fields: Vec<String>,
-    pub edge_types: Vec<SnapshotType>, // string or string[]
+    pub edge_types: Vec<StringOrStrings>, // string or string[]
     pub location_fields: Vec<String>,
     pub node_fields: Vec<String>,
-    pub node_types: Vec<SnapshotType>, // string or string[]
+    pub node_types: Vec<StringOrStrings>, // string or string[]
     pub sample_fields: Vec<String>,
     pub trace_function_info_fields: Vec<String>,
     pub trace_node_fields: Vec<String>,
