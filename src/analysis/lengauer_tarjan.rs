@@ -64,7 +64,7 @@ struct LengauerTarjan {
 impl LengauerTarjan {
     fn new(node_count: usize) -> Self {
         Self {
-            dfnum: vec![0; node_count],
+            dfnum: vec![NodeId::MAX; node_count],
             vertex: vec![NodeId::MAX; node_count],
             parent: vec![NodeId::MAX; node_count],
             n: 0,
@@ -78,7 +78,7 @@ impl LengauerTarjan {
     }
 
     fn dfs<G: GraphOps>(&mut self, graph: &G, node: NodeId, p: NodeId) {
-        if self.dfnum[node as usize] != 0 {
+        if self.dfnum[node as usize] != NodeId::MAX {
             return;
         }
 
@@ -97,10 +97,21 @@ impl LengauerTarjan {
         for i in (1..self.n).rev() {
             let w = self.vertex[i as usize];
             let p = self.parent[w as usize];
+            
+            // Skip if parent is invalid (shouldn't happen for i >= 1)
+            if p == NodeId::MAX {
+                continue;
+            }
+            
             let mut s = p;
 
             // Compute semidominator
             for v in graph.predecessors(w) {
+                // Skip predecessors not visited in DFS
+                if self.dfnum[*v as usize] == NodeId::MAX {
+                    continue;
+                }
+                
                 let s_prime = if self.dfnum[*v as usize] <= self.dfnum[w as usize] {
                     *v
                 } else {
@@ -150,7 +161,7 @@ impl LengauerTarjan {
 
     fn ancestor_with_lowest_semi(&mut self, v: NodeId) -> NodeId {
         let a = self.ancestor[v as usize];
-        if self.ancestor[a as usize] != NodeId::MAX {
+        if a != NodeId::MAX && self.ancestor[a as usize] != NodeId::MAX {
             let b = self.ancestor_with_lowest_semi(a);
             self.ancestor[v as usize] = self.ancestor[a as usize];
             if self.dfnum[self.semi[b as usize] as usize]

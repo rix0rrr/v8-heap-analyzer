@@ -32,19 +32,15 @@ impl Edges {
             to_nodes: Vec::with_capacity(edge_count),
         };
 
-        let mut i: usize = 0;
-        for _ in 0..edge_count {
-            ret.types.push(snapshot_edges[i]);
-            i += 1;
-
-            ret.names.push(snapshot_edges[i]);
-            i += 1;
+        // All indirection for indexes out the window here :D
+        for chunk in snapshot_edges.chunks_exact(3) {
+            ret.types.push(chunk[0]);
+            ret.names.push(chunk[1]);
 
             // The `to_node` fields in the input edges array are *indexes* into the `nodes`
             // array, not node identifiers. Divide them all by the node stride so we don't
             // have to do that later.
-            ret.to_nodes.push(snapshot_edges[i] / node_stride);
-            i += 1;
+            ret.to_nodes.push(chunk[2] / node_stride);
         }
 
         ret
