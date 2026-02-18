@@ -40,7 +40,7 @@ pub fn write_gexf<F: std::io::Write>(
             f,
             r#"        <edge id="{}" source="{}" target="{}" label="{}:{} ({})" />"#,
             edge_id,
-            edge.from_node,
+            edge.from_node(),
             edge.to_node(),
             edge.typ_str(),
             xml_quote(&escape_string(&format!("{}", edge.name_or_index()))),

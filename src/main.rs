@@ -15,8 +15,6 @@ use std::path::PathBuf;
 
 use crate::analysis::dominator_tree::DominatorTree;
 use crate::analysis::dominator_tree::tree_from_immediate_dominators;
-use crate::graph::gexf::write_gexf_file;
-use crate::graph::gml::write_gml_file;
 use crate::graph::v8_heap_graph::EdgeType;
 use crate::graph::v8_heap_graph::NodeType;
 // Import the shared analysis functions
@@ -60,8 +58,8 @@ fn main() -> Result<()> {
     let graph = V8HeapGraph::from(snap);
     std::mem::drop(_t);
 
-    println!("Nodes:       {}", graph.node_count());
-    println!("Edges:       {}", graph.edge_count());
+    println!("Nodes:       {}", graph.total_node_count());
+    println!("Edges:       {}", graph.total_edge_count());
     println!("Memory used: {}", format_bytes(graph.mem_size()));
 
     let root: NodeId = 0;
@@ -115,7 +113,7 @@ fn print_graph(graph: &V8HeapGraph, dom_tree: &DominatorTree) {
             dom_tree.retained_size(nx)
         );
 
-        for edge in graph.edges_for(nx) {
+        for edge in graph.out_edges(nx) {
             println!(
                 "    --[{}:{}]--> {}  {}",
                 edge.typ_str(),
@@ -143,7 +141,7 @@ fn minimal_node_repr(node: NodeId, graph: &V8HeapGraph) -> String {
             return format!(
                 "[ {} ]",
                 graph
-                    .edges_for(node.id)
+                    .out_edges(node.id)
                     .filter(|e| e.typ() == EdgeType::Element)
                     .map(|e| minimal_node_repr(e.to_node(), graph))
                     .join(", ")
@@ -154,7 +152,7 @@ fn minimal_node_repr(node: NodeId, graph: &V8HeapGraph) -> String {
         return format!(
             "{{ {} }}",
             graph
-                .edges_for(node.id)
+                .out_edges(node.id)
                 .filter(|e| e.typ() == EdgeType::Property)
                 .map(|e| e.name_or_index().to_string())
                 .join(", ")

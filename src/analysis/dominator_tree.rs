@@ -31,7 +31,7 @@ pub fn tree_from_immediate_dominators<'a>(
 ) -> DominatorTree {
     let mut ret = DominatorTree {
         children: Default::default(),
-        retained_sizes: vec![0; graph.node_count()],
+        retained_sizes: vec![0; graph.total_node_count()],
     };
 
     for (node_id, immediate_dominator) in immediate_dominators {
@@ -92,7 +92,7 @@ fn print_dominator_node(node_id: NodeId, tree: &DominatorTree, graph: &V8HeapGra
 
 fn show_node(node: Node<'_>) -> String {
     node.graph
-        .edges_for(node.id)
+        .out_edges(node.id)
         .map(|e| format!("{} {} {}", e.typ_str(), e.name_or_index(), e.to_node()))
         .join(", ")
 }

@@ -26,7 +26,7 @@ impl<'a> IntoNeighbors for &'a V8HeapGraph {
 
     #[doc = r" Return an iterator of the neighbors of node `a`."]
     fn neighbors(self, a: Self::NodeId) -> Self::Neighbors {
-        self.out_edges(a).iter().copied()
+        self.out_neighbors(a).iter().copied()
     }
 }
 
@@ -36,13 +36,13 @@ impl Visitable for V8HeapGraph {
 
     #[doc = r" Create a new visitor map"]
     fn visit_map(self: &Self) -> Self::Map {
-        MyFixedBitSet(FixedBitSet::with_capacity(self.node_count()))
+        MyFixedBitSet(FixedBitSet::with_capacity(self.total_node_count()))
     }
 
     #[doc = r" Reset the visitor map (and resize to new size of graph if needed)"]
     fn reset_map(self: &Self, map: &mut Self::Map) {
         map.0.clear();
-        map.0.grow(self.node_count());
+        map.0.grow(self.total_node_count());
     }
 }
 

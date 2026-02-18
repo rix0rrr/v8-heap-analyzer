@@ -19,9 +19,9 @@ use std::collections::HashMap;
 ///
 /// # Returns
 /// A HashMap mapping each node to its immediate dominator
-pub fn lengauer_tarjan<G>(graph: &G, roots: &[NodeId]) -> HashMap<NodeId, NodeId>
+pub fn lengauer_tarjan<'a, G>(graph: &'a G, roots: &[NodeId]) -> HashMap<NodeId, NodeId>
 where
-    G: GraphOps,
+    G: GraphOps<'a>,
 {
     let mut lt = LengauerTarjan::new(graph.node_count());
 
@@ -34,15 +34,18 @@ where
 }
 
 /// Trait for graph operations required by the Lengauer-Tarjan algorithm
-pub trait GraphOps {
+pub trait GraphOps<'a> {
     /// Returns the total number of nodes in the graph
     fn node_count(&self) -> usize;
 
+    type PredIter: Iterator<Item = NodeId> + 'a;
+    type SuccIter: Iterator<Item = NodeId> + 'a;
+
     /// Returns all predecessors (incoming edges) for a given node
-    fn predecessors(&self, node: NodeId) -> &[NodeId];
+    fn predecessors(&'a self, node: NodeId) -> Self::PredIter;
 
     /// Returns all successors (outgoing edges) for a given node
-    fn successors(&self, node: NodeId) -> &[NodeId];
+    fn successors(&'a self, node: NodeId) -> Self::SuccIter;
 }
 
 struct LengauerTarjan {
@@ -77,7 +80,7 @@ impl LengauerTarjan {
         }
     }
 
-    fn dfs<G: GraphOps>(&mut self, graph: &G, node: NodeId, p: NodeId) {
+    fn dfs<'a, G: GraphOps<'a>>(&mut self, graph: &'a G, node: NodeId, p: NodeId) {
         if self.dfnum[node as usize] != NodeId::MAX {
             return;
         }
@@ -88,34 +91,34 @@ impl LengauerTarjan {
         self.n += 1;
 
         for succ in graph.successors(node) {
-            self.dfs(graph, *succ, node);
+            self.dfs(graph, succ, node);
         }
     }
 
-    fn compute_dominators<G: GraphOps>(mut self, graph: &G) -> HashMap<NodeId, NodeId> {
+    fn compute_dominators<'a, G: GraphOps<'a>>(mut self, graph: &'a G) -> HashMap<NodeId, NodeId> {
         // Process nodes in reverse DFS order
         for i in (1..self.n).rev() {
             let w = self.vertex[i as usize];
             let p = self.parent[w as usize];
-            
+
             // Skip if parent is invalid (shouldn't happen for i >= 1)
             if p == NodeId::MAX {
                 continue;
             }
-            
+
             let mut s = p;
 
             // Compute semidominator
             for v in graph.predecessors(w) {
                 // Skip predecessors not visited in DFS
-                if self.dfnum[*v as usize] == NodeId::MAX {
+                if self.dfnum[v as usize] == NodeId::MAX {
                     continue;
                 }
-                
-                let s_prime = if self.dfnum[*v as usize] <= self.dfnum[w as usize] {
-                    *v
+
+                let s_prime = if self.dfnum[v as usize] <= self.dfnum[w as usize] {
+                    v
                 } else {
-                    let ancestor_result = self.ancestor_with_lowest_semi(*v);
+                    let ancestor_result = self.ancestor_with_lowest_semi(v);
                     self.semi[ancestor_result as usize]
                 };
 
@@ -179,6 +182,25 @@ impl LengauerTarjan {
     }
 }
 
+pub struct IterWrapper<'a> {
+    iter: Box<dyn Iterator<Item = NodeId> + 'a>,
+}
+impl<'a> IterWrapper<'a> {
+    pub fn new(iter: impl Iterator<Item = NodeId> + 'a) -> Self {
+        IterWrapper {
+            iter: Box::new(iter),
+        }
+    }
+}
+
+impl<'a> Iterator for IterWrapper<'a> {
+    type Item = NodeId;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,17 +210,20 @@ mod tests {
         succs: Vec<Vec<NodeId>>,
     }
 
-    impl GraphOps for TestGraph {
+    impl<'a> GraphOps<'a> for TestGraph {
+        type PredIter = IterWrapper<'a>;
+        type SuccIter = IterWrapper<'a>;
+
         fn node_count(&self) -> usize {
             self.preds.len()
         }
 
-        fn predecessors(&self, node: NodeId) -> &[NodeId] {
-            &self.preds[node as usize]
+        fn predecessors(&'a self, node: NodeId) -> Self::PredIter {
+            IterWrapper::new(self.preds[node as usize].iter().copied())
         }
 
-        fn successors(&self, node: NodeId) -> &[NodeId] {
-            &self.succs[node as usize]
+        fn successors(&'a self, node: NodeId) -> Self::SuccIter {
+            IterWrapper::new(self.succs[node as usize].iter().copied())
         }
     }
 

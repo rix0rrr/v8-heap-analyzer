@@ -1,9 +1,6 @@
 use std::borrow::Cow;
 
-use crate::{
-    snapshot::StringOrStrings,
-    utils::{escape_string, escape_string_chars, print_safe},
-};
+use crate::{graph::lengauer_tarjan::IterWrapper, snapshot::StringOrStrings, utils::print_safe};
 
 use super::super::{snapshot::SnapshotFile, types::NodeId};
 
@@ -22,6 +19,8 @@ pub struct V8HeapGraph {
 
     /// For every node, where in the "edges" array its edges start
     node_out_edges: Vec<NodeId>,
+
+    /// For every node, what edges are incoming edges for it
     node_in_edges: Vec<Vec<NodeId>>,
 }
 
@@ -39,11 +38,11 @@ impl V8HeapGraph {
     }
 
     pub fn iter_nodes(&self) -> impl Iterator<Item = NodeId> {
-        (0 as NodeId)..(self.node_count() as NodeId)
+        (0 as NodeId)..(self.total_node_count() as NodeId)
     }
 
     pub fn iter_edges(&self) -> impl Iterator<Item = NodeId> {
-        (0 as NodeId)..(self.edge_count() as NodeId)
+        (0 as NodeId)..(self.total_edge_count() as NodeId)
     }
 
     pub fn node_range(&self, node: NodeId) -> &[NodeId] {
@@ -52,24 +51,7 @@ impl V8HeapGraph {
     }
 
     pub fn edge(&self, nr: NodeId) -> Edge<'_> {
-        // Returns the index of the first element > nr
-        //
-        //   ┌────────────────────────┐    ┌─┬────▶┌───────────────┐
-        //   │    Node 0 (0 edges)  0 │────┘ │     │    Edge 0     │
-        //   ├────────────────────────┤      │ ┌──▶├───────────────┤
-        //   │    Node 1 (1 edge)   0 │──────┘ │   │    Edge 1     │
-        //   ├────────────────────────┤        │   ├───────────────┤
-        //   │    Node 2 (2 edges)  1 │────────┘   │    Edge 2     │
-        //   └────────────────────────┘            └───────────────┘
-        //
-        // For example, if we're looking for the Node for edge 0, we will
-        // find Node 2 as a partition point (its value is 1, which is the first
-        // one higher than the node we're looking for). Then subtract 1 to find
-        // the actual source node, Node 1.
-        let part = self.node_out_edges.partition_point(|probe| *probe <= nr);
-
         Edge {
-            from_node: (part - 1) as NodeId,
             edges: &self.edges,
             edge: nr,
             strings: &self.strings,
@@ -88,11 +70,11 @@ impl V8HeapGraph {
         &self.strings[index as usize]
     }
 
-    pub fn node_count(&self) -> usize {
+    pub fn total_node_count(&self) -> usize {
         self.node_count
     }
 
-    pub fn edge_count(&self) -> usize {
+    pub fn total_edge_count(&self) -> usize {
         self.edges.size()
     }
 
@@ -102,7 +84,7 @@ impl V8HeapGraph {
     }
 
     pub fn find_edge(&self, n: NodeId, edge_type: EdgeType, name: &str) -> Option<NodeId> {
-        for edge in self.edges_for(n) {
+        for edge in self.out_edges(n) {
             if edge.typ() == edge_type && edge.name_or_index().is_str(name) {
                 return Some(edge.to_node());
             }
@@ -110,11 +92,15 @@ impl V8HeapGraph {
         None
     }
 
-    pub fn edges_for(&self, n: NodeId) -> impl Iterator<Item = Edge<'_>> {
+    pub fn out_edges(&self, n: NodeId) -> impl Iterator<Item = Edge<'_>> {
         let start = self.node_out_edges[n as usize] as usize;
         let end = start + self.edge_count_for(n) as usize;
 
         (start..end).map(|e| self.edge(e as NodeId))
+    }
+
+    pub fn in_edges(&self, n: NodeId) -> impl Iterator<Item = Edge<'_>> {
+        self.node_in_edges[n as usize].iter().map(|e| self.edge(*e))
     }
 
     pub fn self_size_for(&self, n: NodeId) -> usize {
@@ -122,33 +108,31 @@ impl V8HeapGraph {
             as usize
     }
 
-    /// All out edges for a Node
-    pub fn out_edges(&self, node: NodeId) -> &[NodeId] {
+    /// Returns the target nodes for all outgoing edges for the given node
+    pub fn out_neighbors(&self, node: NodeId) -> &[NodeId] {
         let start = self.node_out_edges[node as usize];
         self.edges
             .to(start as usize, self.edge_count_for(node) as usize)
     }
 
-    /// All in edges for a Node
-    pub fn in_edges(&self, node: NodeId) -> &[NodeId] {
-        &self.node_in_edges[node as usize]
+    /// Returns the source nodes for all incoming edges for the given node
+    pub fn in_neighbors(&self, node: NodeId) -> impl Iterator<Item = NodeId> {
+        self.in_edges(node).map(|e| e.to_node())
     }
 }
 
 impl From<SnapshotFile> for V8HeapGraph {
     fn from(mut value: SnapshotFile) -> Self {
         let node_count = value.snapshot.node_count;
+
         let node_fields = NodeFields::new(value.snapshot.meta.node_fields);
         let edge_fields = EdgeFields::new(value.snapshot.meta.edge_fields);
 
-        let edges = Edges::new(
+        let mut edges = Edges::new(
             value.edges,
             value.snapshot.edge_count,
             node_fields.stride() as NodeId,
         );
-
-        let mut node_out_edges = Vec::<NodeId>::with_capacity(node_count);
-        let mut node_in_edges = vec![Vec::new(); node_count];
 
         let edge_counts = value
             .nodes
@@ -157,16 +141,29 @@ impl From<SnapshotFile> for V8HeapGraph {
             .step_by(node_fields.stride())
             .copied();
 
-        let mut out_edge_index: NodeId = 0;
-        let mut edge_idx: usize = 0;
-        for (from_node, edge_count) in edge_counts.enumerate() {
-            node_out_edges.push(out_edge_index);
-            out_edge_index += edge_count;
+        // node -> index of its starting 'out' edges
+        let mut node_out_edges = Vec::<NodeId>::with_capacity(node_count);
 
+        // node -> ['in' edges]
+        let mut node_in_edges = vec![Vec::<NodeId>::new(); node_count];
+
+        let mut current_edge: NodeId = 0;
+        for (from_node, edge_count) in edge_counts.enumerate() {
+            // Count the indexes of the 'out' edges
+            node_out_edges.push(current_edge);
+
+            // This many edges have the current 'from' node as source
+            edges.from_nodes.extend(std::iter::repeat_n(
+                from_node as NodeId,
+                edge_count as usize,
+            ));
+
+            // For every edge, record the source node and add it to the list if incoming edges
             for _ in 0..edge_count {
-                let to_node = edges.to1(edge_idx);
-                node_in_edges[to_node as usize].push(from_node as NodeId);
-                edge_idx += 1;
+                let to_node = edges.to1(current_edge as usize);
+                node_in_edges[to_node as usize].push(current_edge);
+
+                current_edge += 1;
             }
         }
 
@@ -242,7 +239,6 @@ impl<'a> Node<'a> {
 }
 
 pub struct Edge<'a> {
-    pub from_node: NodeId,
     edge: NodeId,
     strings: &'a Vec<String>,
     edges: &'a Edges,
@@ -267,6 +263,10 @@ impl<'a> Edge<'a> {
             EdgeType::Element => NameOrIndex::Index(ni),
             _ => NameOrIndex::Name(&self.strings[ni as usize]),
         }
+    }
+
+    pub fn from_node(&self) -> NodeId {
+        self.edges.from_nodes[self.edge as usize]
     }
 
     pub fn to_node(&self) -> NodeId {
@@ -306,6 +306,7 @@ struct Edges {
     types: Vec<NodeId>,
     names: Vec<NodeId>,
     to_nodes: Vec<NodeId>,
+    pub from_nodes: Vec<NodeId>,
 }
 
 impl Edges {
@@ -314,6 +315,9 @@ impl Edges {
             types: Vec::with_capacity(edge_count),
             names: Vec::with_capacity(edge_count),
             to_nodes: Vec::with_capacity(edge_count),
+
+            // from_nodes gets filled later
+            from_nodes: Vec::with_capacity(edge_count),
         };
 
         // All indirection for indexes out the window here :D

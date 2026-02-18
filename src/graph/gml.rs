@@ -33,7 +33,7 @@ pub fn write_gml<F: std::io::Write>(
         writeln!(
             f,
             "  edge [\n    source {}\n    target {}\n    label \"{}:{}\"\n  ]",
-            edge.from_node,
+            edge.from_node(),
             edge.to_node(),
             edge.typ_str(),
             xml_quote(&escape_string(&format!("{}", edge.name_or_index()))),
