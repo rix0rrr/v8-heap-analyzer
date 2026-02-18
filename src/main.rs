@@ -9,20 +9,16 @@ mod utils;
 
 use anyhow::Result;
 use clap::Parser;
-use itertools::Itertools;
-use petgraph::visit::Bfs;
 use std::path::PathBuf;
 
-use crate::analysis::dominator_tree::DominatorTree;
 use crate::analysis::dominator_tree::tree_from_immediate_dominators;
-use crate::graph::v8_heap_graph::EdgeType;
-use crate::graph::v8_heap_graph::NodeType;
 // Import the shared analysis functions
 use crate::graph::v8_heap_graph::V8HeapGraph;
+use crate::report::print_dominator_tree;
+use crate::report::print_graph;
 use crate::snapshot::read_v8_snapshot_file;
 use crate::types::NodeId;
 use crate::utils::format_bytes;
-use crate::utils::print_safe;
 use crate::utils::start_timer;
 
 #[derive(Parser)]
@@ -44,17 +40,25 @@ struct Cli {
     /// Include hidden classes in duplicate detection
     #[arg(long, default_value = "false")]
     include_hidden_classes: bool,
+
+    /// Print the graph
+    #[arg(short, long, default_value = "false")]
+    print: bool,
+
+    /// Print the dominator tree
+    #[arg(short, long, default_value = "false")]
+    tree: bool,
 }
 
 fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let args = Cli::parse();
 
     println!("V8 Heap Analyzer v0.1.0");
     println!();
 
     // Full serde
-    let _t = start_timer(format!("Loading {}", cli.input.display()));
-    let snap = read_v8_snapshot_file(&cli.input)?;
+    let _t = start_timer(format!("Loading {}", args.input.display()));
+    let snap = read_v8_snapshot_file(&args.input)?;
     let graph = V8HeapGraph::from(snap);
     std::mem::drop(_t);
 
@@ -68,9 +72,16 @@ fn main() -> Result<()> {
     std::mem::drop(_t);
 
     let tree = tree_from_immediate_dominators(lt, &graph);
-    // print_dominator_tree(&tree, &graph);
-    print_graph(&graph, &tree);
-    // write_gml_file(Path::new("graph.gml"), &graph)?;
+
+    if args.print {
+        println!("");
+        print_graph(&graph, &tree);
+    }
+
+    if args.tree {
+        println!("");
+        print_dominator_tree(&tree, &graph);
+    }
 
     /*
     let _t = start_timer("Calculating dominators (Cooper's)".into());
@@ -96,68 +107,4 @@ fn main() -> Result<()> {
     //    println!("{:?}", snap);
 
     Ok(())
-}
-
-fn print_graph(graph: &V8HeapGraph, dom_tree: &DominatorTree) {
-    let mut bfs = Bfs::new(&graph, 0);
-    while let Some(nx) = bfs.next(&graph) {
-        let node = graph.node(nx);
-
-        println!(
-            "node {} type={} name={} stable_id={} self_size={} retained_size={}",
-            nx,
-            node.typ_str(),
-            node.print_safe_name(40),
-            node.stable_id(),
-            node.self_size(),
-            dom_tree.retained_size(nx)
-        );
-
-        for edge in graph.out_edges(nx) {
-            println!(
-                "    --[{}:{}]--> {}  {}",
-                edge.typ_str(),
-                edge.name_or_index(),
-                edge.to_node(),
-                minimal_node_repr(edge.to_node(), graph),
-            );
-        }
-        println!("");
-    }
-}
-
-fn minimal_node_repr(node: NodeId, graph: &V8HeapGraph) -> String {
-    let node = graph.node(node);
-    if node.typ() == NodeType::String {
-        return print_safe(node.name(), 30);
-    }
-
-    if node.typ() == NodeType::Object {
-        if graph
-            .find_edge(node.id, EdgeType::Internal, "elements")
-            .is_some()
-        {
-            // It's an array or array-like, format like an array
-            return format!(
-                "[ {} ]",
-                graph
-                    .out_edges(node.id)
-                    .filter(|e| e.typ() == EdgeType::Element)
-                    .map(|e| minimal_node_repr(e.to_node(), graph))
-                    .join(", ")
-            );
-        }
-
-        // Format as a regular object
-        return format!(
-            "{{ {} }}",
-            graph
-                .out_edges(node.id)
-                .filter(|e| e.typ() == EdgeType::Property)
-                .map(|e| e.name_or_index().to_string())
-                .join(", ")
-        );
-    }
-
-    format!("{}:{}", node.typ_str(), node.print_safe_name(30))
 }

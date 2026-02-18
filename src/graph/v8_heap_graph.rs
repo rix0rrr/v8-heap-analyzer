@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use crate::{graph::lengauer_tarjan::IterWrapper, snapshot::StringOrStrings, utils::print_safe};
+use crate::{snapshot::StringOrStrings, utils::print_safe};
 
 use super::super::{snapshot::SnapshotFile, types::NodeId};
 

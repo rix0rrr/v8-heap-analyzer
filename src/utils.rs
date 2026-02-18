@@ -29,9 +29,8 @@ pub fn escape_string_chars(s: impl IntoIterator<Item = char>) -> String {
             '\t' => vec!['\\', 't'],
             '\\' => vec!['\\', '\\'],
             '"' => vec!['\\', '"'],
-            ' ' => vec![' '],
-            c if c.is_alphanumeric() => vec![c],
-            _ => vec!['?'],
+            c if c < ' ' || c > '~' => vec!['?'],
+            c => vec![c],
         })
         .collect()
 }

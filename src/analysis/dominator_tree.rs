@@ -1,12 +1,6 @@
 use std::collections::HashMap;
 
-use itertools::Itertools;
-
-use crate::{
-    graph::v8_heap_graph::{Node, V8HeapGraph},
-    types::NodeId,
-    utils::format_bytes,
-};
+use crate::{graph::v8_heap_graph::V8HeapGraph, types::NodeId};
 
 #[derive(Debug, Default)]
 pub struct DominatorNode {
@@ -15,8 +9,8 @@ pub struct DominatorNode {
 }
 
 pub struct DominatorTree {
-    children: HashMap<NodeId, Vec<NodeId>>,
-    retained_sizes: Vec<usize>,
+    pub children: HashMap<NodeId, Vec<NodeId>>,
+    pub retained_sizes: Vec<usize>,
 }
 
 impl DominatorTree {
@@ -60,39 +54,4 @@ fn annotate_retained_sizes(
     };
 
     retained_sizes[root as usize]
-}
-
-pub fn print_dominator_tree(tree: &DominatorTree, graph: &V8HeapGraph) {
-    print_dominator_node(0, tree, graph, 0);
-}
-
-fn print_dominator_node(node_id: NodeId, tree: &DominatorTree, graph: &V8HeapGraph, depth: usize) {
-    let node = graph.node(node_id);
-    let retained_size = tree.retained_sizes[node_id as usize];
-
-    println!(
-        "{}({}) {}@{} ({}) {}",
-        "    ".repeat(depth),
-        node.typ_str(),
-        node.print_safe_name(40),
-        node.id.clone(),
-        format_bytes(retained_size),
-        show_node(node)
-    );
-
-    if let Some(mut children) = tree.children.get(&node_id).cloned() {
-        // Sort by retained sizes descending
-        children.sort_by_key(|node| -(tree.retained_sizes[*node as usize] as i64));
-
-        for child in &children[0..20.min(children.len())] {
-            print_dominator_node(*child, tree, graph, depth + 1);
-        }
-    }
-}
-
-fn show_node(node: Node<'_>) -> String {
-    node.graph
-        .out_edges(node.id)
-        .map(|e| format!("{} {} {}", e.typ_str(), e.name_or_index(), e.to_node()))
-        .join(", ")
 }
