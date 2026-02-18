@@ -338,6 +338,7 @@ impl Edges {
         (self.types.len() * size_of::<NodeId>())
             + (self.names.len() * size_of::<NodeId>())
             + (self.to_nodes.len() * size_of::<NodeId>())
+            + (self.from_nodes.len() * size_of::<NodeId>())
     }
 
     pub fn to1(&self, edge: usize) -> NodeId {
