@@ -4,7 +4,16 @@ use crate::{snapshot::StringOrStrings, utils::print_safe};
 
 use super::super::{snapshot::SnapshotFile, types::NodeId};
 
-// TODO: Perhaps we can make this an araay of structures for better cache locality
+#[derive(Debug, Clone, Copy)]
+pub struct EdgeId(NodeId);
+
+pub type GraphPath = Vec<EdgeId>;
+
+impl std::fmt::Display for EdgeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 #[derive(Debug)]
 pub struct V8HeapGraph {
@@ -41,8 +50,8 @@ impl V8HeapGraph {
         (0 as NodeId)..(self.total_node_count() as NodeId)
     }
 
-    pub fn iter_edges(&self) -> impl Iterator<Item = NodeId> {
-        (0 as NodeId)..(self.total_edge_count() as NodeId)
+    pub fn iter_edges(&self) -> impl Iterator<Item = EdgeId> {
+        ((0 as NodeId)..(self.total_edge_count() as NodeId)).map(EdgeId)
     }
 
     pub fn node_range(&self, node: NodeId) -> &[NodeId] {
@@ -50,10 +59,10 @@ impl V8HeapGraph {
         &self.nodes[start..start + self.node_fields.stride()]
     }
 
-    pub fn edge(&self, nr: NodeId) -> Edge<'_> {
+    pub fn edge(&self, nr: EdgeId) -> Edge<'_> {
         Edge {
             edges: &self.edges,
-            edge: nr,
+            id: nr,
             strings: &self.strings,
         }
     }
@@ -83,6 +92,7 @@ impl V8HeapGraph {
         self.nodes[n as usize * self.node_fields.stride() + self.node_fields.edge_count_field()]
     }
 
+    /// Find the neighor for an edge
     pub fn find_edge(&self, n: NodeId, edge_type: EdgeType, name: &str) -> Option<NodeId> {
         for edge in self.out_edges(n) {
             if edge.typ() == edge_type && edge.name_or_index().is_str(name) {
@@ -96,11 +106,13 @@ impl V8HeapGraph {
         let start = self.node_out_edges[n as usize] as usize;
         let end = start + self.edge_count_for(n) as usize;
 
-        (start..end).map(|e| self.edge(e as NodeId))
+        (start..end).map(|e| self.edge(EdgeId(e as NodeId)))
     }
 
     pub fn in_edges(&self, n: NodeId) -> impl Iterator<Item = Edge<'_>> {
-        self.node_in_edges[n as usize].iter().map(|e| self.edge(*e))
+        self.node_in_edges[n as usize]
+            .iter()
+            .map(|e| self.edge(EdgeId(*e)))
     }
 
     pub fn self_size_for(&self, n: NodeId) -> usize {
@@ -239,14 +251,14 @@ impl<'a> Node<'a> {
 }
 
 pub struct Edge<'a> {
-    edge: NodeId,
+    pub id: EdgeId,
     strings: &'a Vec<String>,
     edges: &'a Edges,
 }
 
 impl<'a> Edge<'a> {
     pub fn typ(&self) -> EdgeType {
-        self.edges.types[self.edge as usize].into()
+        self.edges.types[self.id.0 as usize].into()
     }
 
     pub fn typ_str(&self) -> &str {
@@ -254,11 +266,11 @@ impl<'a> Edge<'a> {
     }
 
     pub fn index(&self) -> NodeId {
-        self.edges.names[self.edge as usize]
+        self.edges.names[self.id.0 as usize]
     }
 
     pub fn name_or_index(&self) -> NameOrIndex<'a> {
-        let ni = self.edges.names[self.edge as usize];
+        let ni = self.edges.names[self.id.0 as usize];
         match self.typ() {
             EdgeType::Element => NameOrIndex::Index(ni),
             _ => NameOrIndex::Name(&self.strings[ni as usize]),
@@ -266,11 +278,11 @@ impl<'a> Edge<'a> {
     }
 
     pub fn from_node(&self) -> NodeId {
-        self.edges.from_nodes[self.edge as usize]
+        self.edges.from_nodes[self.id.0 as usize]
     }
 
     pub fn to_node(&self) -> NodeId {
-        self.edges.to_nodes[self.edge as usize]
+        self.edges.to_nodes[self.id.0 as usize]
     }
 }
 
