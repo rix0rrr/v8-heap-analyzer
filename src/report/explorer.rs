@@ -56,17 +56,21 @@ impl<'a> ExplorerState<'a> {
         }
     }
 
-    pub fn move_selection(&mut self, delta: isize) {
-        if delta > 0 {
-            self.selected = (self.selected + delta as usize).min(self.flat_list.len() - 1)
-        } else {
-            self.selected = self.selected.saturating_sub((-delta) as usize);
-        }
+    pub fn set_selection(&mut self, selected: usize) {
+        self.selected = selected;
         if self.selected >= self.scroll_offset + self.height {
             self.scroll_offset = self.selected - self.height + 1;
         }
         if self.selected < self.scroll_offset {
             self.scroll_offset = self.selected;
+        }
+    }
+
+    pub fn move_selection(&mut self, delta: isize) {
+        if delta > 0 {
+            self.set_selection((self.selected + delta as usize).min(self.flat_list.len() - 1));
+        } else {
+            self.set_selection(self.selected.saturating_sub((-delta) as usize));
         }
     }
 
@@ -106,7 +110,7 @@ impl<'a> ExplorerState<'a> {
                         if self.expanded.contains(&parent_id) {
                             self.expanded.remove(&parent_id);
                             self.update_flat_list();
-                            self.selected = i;
+                            self.set_selection(i);
                         }
                         break;
                     }
@@ -143,8 +147,11 @@ pub fn explore_graph(tree: &DominatorTree, graph: &V8HeapGraph) -> Result<()> {
                 .constraints([Constraint::Min(0), Constraint::Length(3)])
                 .split(frame.area());
 
-            let items: Vec<ListItem> = state
-                .flat_list
+            // We need to virtualize this tree, otherwise it's too big
+            let tree_slice = (state.scroll_offset)
+                ..(state.scroll_offset + state.height).min(state.flat_list.len());
+
+            let items: Vec<ListItem> = state.flat_list[tree_slice]
                 .iter()
                 .map(|(node, depth)| {
                     let prefix = "  ".repeat(*depth);
@@ -157,7 +164,10 @@ pub fn explore_graph(tree: &DominatorTree, graph: &V8HeapGraph) -> Result<()> {
                     ListItem::new(Line::from(vec![
                         Span::raw(prefix),
                         Span::raw(expand_marker),
-                        Span::raw(format!("  {:>7}  ", format_bytes(node.retained_size))),
+                        Span::styled(
+                            format!("{:>7}  ", format_bytes(node.retained_size)),
+                            Style::default().fg(Color::Yellow),
+                        ),
                         Span::raw(&node.label),
                     ]))
                 })
@@ -180,8 +190,7 @@ pub fn explore_graph(tree: &DominatorTree, graph: &V8HeapGraph) -> Result<()> {
                 list,
                 chunks[0],
                 &mut ratatui::widgets::ListState::default()
-                    .with_selected(Some(state.selected))
-                    .with_offset(state.scroll_offset),
+                    .with_selected(Some(state.selected - state.scroll_offset)),
             );
 
             let help = Paragraph::new("←/↓/↑/→ h/j/k/l: Navigate | Enter/Space: Toggle | q: Quit")

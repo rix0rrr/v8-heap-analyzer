@@ -74,7 +74,9 @@ fn main() -> Result<()> {
     let lt = graph::lengauer_tarjan::lengauer_tarjan(&graph, &[root]);
     std::mem::drop(_t);
 
+    let _t = start_timer("Converting dominators to tree".into());
     let tree = tree_from_immediate_dominators(lt, &graph);
+    std::mem::drop(_t);
 
     if args.print {
         println!("");

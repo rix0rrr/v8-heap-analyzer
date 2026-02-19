@@ -72,12 +72,10 @@ pub fn minimal_node_repr(node: NodeId, graph: &V8HeapGraph) -> String {
         NodeType::Number => format!("<a number>"),
         NodeType::BigInt => format!("<a bigint>"),
         NodeType::Closure => format!("function {}()", node.name()),
-        NodeType::Symbol => {
-            let name = graph
-                .find_edge(node.id, EdgeType::Internal, "name")
-                .expect("Symbol must have name");
-            format!("symbol {}", minimal_node_repr(name, graph))
-        }
+        NodeType::Symbol => match graph.find_edge(node.id, EdgeType::Internal, "name") {
+            Some(name) => format!("symbol {}", minimal_node_repr(name, graph)),
+            None => "unnamed symbol".to_string(),
+        },
         NodeType::Object => {
             if graph
                 .find_edge(node.id, EdgeType::Internal, "elements")

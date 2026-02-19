@@ -81,7 +81,7 @@ pub struct Timer {
 }
 
 pub fn start_timer(name: String) -> Timer {
-    print!("{}... ", name);
+    eprint!("{}... ", name);
     let _ = stdout().flush();
     Timer {
         name,
@@ -92,6 +92,6 @@ pub fn start_timer(name: String) -> Timer {
 impl Drop for Timer {
     fn drop(&mut self) {
         let duration = Instant::now() - self.start;
-        println!("Done ({:?})", duration);
+        eprintln!("Done ({:?})", duration);
     }
 }
