@@ -70,7 +70,7 @@ fn main() -> Result<()> {
     println!("Memory used: {}", format_bytes(graph.mem_size()));
 
     let root: NodeId = 0;
-    let _t = start_timer("Calculating dominators (Lengauer Tarjan)".into());
+    let _t = start_timer("Calculating dominators".into());
     let lt = graph::lengauer_tarjan::lengauer_tarjan(&graph, &[root]);
     std::mem::drop(_t);
 

@@ -4,6 +4,7 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use itertools::Itertools;
 use ratatui::{
     Frame, Terminal,
     backend::CrosstermBackend,
@@ -12,7 +13,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Padding, Paragraph},
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io;
 
 use crate::{
@@ -23,26 +24,42 @@ use crate::{
     utils::format_bytes,
 };
 
-struct TreeNode {
-    id: NodeId,
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
+enum UiTreeId {
+    /// This is an artificial group node
+    Group(usize),
+
+    /// This is a heap node
+    Heap(NodeId),
+}
+
+impl Default for UiTreeId {
+    fn default() -> Self {
+        UiTreeId::Group(usize::MAX)
+    }
+}
+
+#[derive(Clone, Default)]
+struct UiTreeNode {
+    id: UiTreeId,
     label: String,
     retained_size: usize,
-    children: Vec<TreeNode>,
+    children: Vec<UiTreeNode>,
 }
 
 struct ExplorerState<'a> {
     pub selected: usize,
     pub scroll_offset: usize,
     pub height: usize,
-    pub expanded: HashSet<NodeId>,
-    pub flat_list: Vec<(&'a TreeNode, usize)>,
-    pub root: &'a TreeNode,
+    pub expanded: HashSet<UiTreeId>,
+    pub flat_list: Vec<(&'a UiTreeNode, usize)>,
+    pub root: &'a UiTreeNode,
 }
 
 impl<'a> ExplorerState<'a> {
-    pub fn new(root: &'a TreeNode) -> Self {
-        let mut expanded = HashSet::<NodeId>::new();
-        expanded.insert(0); // Root starts expanded
+    pub fn new(root: &'a UiTreeNode) -> Self {
+        let mut expanded = HashSet::<UiTreeId>::new();
+        expanded.insert(UiTreeId::Heap(0)); // Root starts expanded
 
         let flat_list = flatten_tree(&root, &expanded);
 
@@ -119,7 +136,7 @@ impl<'a> ExplorerState<'a> {
         }
     }
 
-    fn selected_id(&self) -> NodeId {
+    fn selected_id(&self) -> UiTreeId {
         self.flat_list[self.selected].0.id
     }
 
@@ -136,7 +153,8 @@ pub fn explore_graph(tree: &DominatorTree, graph: &V8HeapGraph) -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     // Shared state between draw and poll
-    let root = build_tree_node(0, tree, graph, 0);
+    let mut root = build_ui_tree(0, tree, graph);
+    find_groups_in_ui_tree(&mut root);
     let mut state = ExplorerState::new(&root);
 
     loop {
@@ -168,7 +186,11 @@ pub fn explore_graph(tree: &DominatorTree, graph: &V8HeapGraph) -> Result<()> {
                             format!("{:>7}  ", format_bytes(node.retained_size)),
                             Style::default().fg(Color::Yellow),
                         ),
-                        Span::raw(&node.label),
+                        if matches!(node.id, UiTreeId::Heap(_)) {
+                            Span::raw(&node.label)
+                        } else {
+                            Span::styled(&node.label, Style::default().fg(Color::Green))
+                        },
                     ]))
                 })
                 .collect();
@@ -237,56 +259,114 @@ pub fn explore_graph(tree: &DominatorTree, graph: &V8HeapGraph) -> Result<()> {
     Ok(())
 }
 
-fn build_tree_node(
-    node_id: NodeId,
-    tree: &DominatorTree,
-    graph: &V8HeapGraph,
-    depth: usize,
-) -> TreeNode {
+/// Build a UI tree from the given graph and node
+fn build_ui_tree(node_id: NodeId, tree: &DominatorTree, graph: &V8HeapGraph) -> UiTreeNode {
     let node = graph.node(node_id);
-    let retained_size = tree.retained_sizes[node_id as usize];
+    let retained_size = tree.retained_size(node_id);
     let label = minimal_node_repr(node.id, graph);
 
-    let children = if let Some(mut child_ids) = tree.children.get(&node_id).cloned() {
-        child_ids.sort_by_key(|n| -(tree.retained_sizes[*n as usize] as i64));
-        child_ids.retain(|n| {
-            !matches!(
-                graph.node(*n).typ(),
-                NodeType::Hidden
-                    | NodeType::ObjectShape
-                    | NodeType::ConcatString
-                    | NodeType::SlicedString
-                    | NodeType::Code
-                    | NodeType::Array
-            )
-        });
-
+    let mut children = if let Some(child_ids) = tree.children.get(&node_id) {
         child_ids
             .iter()
-            .map(|&child| build_tree_node(child, tree, graph, depth + 1))
+            .filter(|&&n| {
+                !matches!(
+                    graph.node(n).typ(),
+                    NodeType::Hidden
+                        | NodeType::ObjectShape
+                        | NodeType::ConcatString
+                        | NodeType::SlicedString
+                        | NodeType::Code
+                        | NodeType::Array
+                )
+            })
+            .map(|&child| build_ui_tree(child, tree, graph))
             .collect()
     } else {
         vec![]
     };
 
-    TreeNode {
-        id: node_id,
+    children.sort_by_key(|n| -(n.retained_size as isize));
+
+    UiTreeNode {
+        id: UiTreeId::Heap(node_id),
         label,
         retained_size,
         children,
     }
 }
 
-fn flatten_tree<'a>(node: &'a TreeNode, expanded: &HashSet<NodeId>) -> Vec<(&'a TreeNode, usize)> {
+/// Find and insert groups into this tree
+///
+/// We group nodes if they occur at the same level in the dominator tree and have the same minimal rendering (label)
+fn find_groups_in_ui_tree(tree: &mut UiTreeNode) {
+    let mut ctr = 0;
+    find_groups_in_ui_tree_rec(tree, &mut ctr);
+}
+
+fn find_groups_in_ui_tree_rec(tree: &mut UiTreeNode, group_counter: &mut usize) {
+    // Only for heap nodes
+    if matches!(tree.id, UiTreeId::Heap(_)) {
+        let mut labels: HashMap<String, Vec<usize>> = Default::default();
+        for (i, child) in tree.children.iter().enumerate() {
+            labels.entry(child.label.clone()).or_default().push(i);
+        }
+
+        if labels.iter().any(|(_, ixes)| ixes.len() > 1) {
+            let mut old_children = std::mem::take(&mut tree.children);
+
+            // We have duplicates. The easiest way to deal with this is to rebuild the entire "children" list for this tree node.
+            tree.children = labels
+                .into_iter()
+                .map(|(_, indexes)| {
+                    if indexes.len() == 1 {
+                        std::mem::take(&mut old_children[indexes[0]])
+                    } else {
+                        let retained_size =
+                            indexes.iter().map(|&i| old_children[i].retained_size).sum();
+                        let children = indexes
+                            .iter()
+                            .map(|&i| std::mem::take(&mut old_children[i]))
+                            .collect_vec();
+
+                        let ret = UiTreeNode {
+                            id: UiTreeId::Group(*group_counter),
+                            label: format!(
+                                "<Group> {} instances of {}",
+                                indexes.len(),
+                                children[0].label
+                            ),
+                            retained_size,
+                            children,
+                        };
+                        *group_counter += 1;
+                        ret
+                    }
+                })
+                .collect_vec();
+
+            tree.children.sort_by_key(|n| -(n.retained_size as isize));
+        }
+    }
+
+    for child in &mut tree.children {
+        find_groups_in_ui_tree_rec(child, group_counter);
+    }
+}
+
+/// Flattens the tree out to a list of renderable records, based on the expanded nodes.
+fn flatten_tree<'a>(
+    node: &'a UiTreeNode,
+    expanded: &HashSet<UiTreeId>,
+) -> Vec<(&'a UiTreeNode, usize)> {
     let mut result = vec![];
     flatten_recursive(node, expanded, &mut result, 0);
     result
 }
 
 fn flatten_recursive<'a>(
-    node: &'a TreeNode,
-    expanded: &HashSet<NodeId>,
-    result: &mut Vec<(&'a TreeNode, usize)>,
+    node: &'a UiTreeNode,
+    expanded: &HashSet<UiTreeId>,
+    result: &mut Vec<(&'a UiTreeNode, usize)>,
     depth: usize,
 ) {
     result.push((node, depth));
