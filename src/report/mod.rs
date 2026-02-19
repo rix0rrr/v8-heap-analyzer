@@ -8,6 +8,10 @@ use crate::{
     utils::{format_bytes, print_safe},
 };
 
+pub mod explorer;
+
+pub use explorer::explore_graph;
+
 pub fn print_graph(graph: &V8HeapGraph, dom_tree: &DominatorTree) {
     let mut bfs = Bfs::new(&graph, 0);
     while let Some(nx) = bfs.next(&graph) {
@@ -38,11 +42,12 @@ pub fn print_graph(graph: &V8HeapGraph, dom_tree: &DominatorTree) {
     }
 }
 
-fn minimal_node_repr(node: NodeId, graph: &V8HeapGraph) -> String {
+pub fn minimal_node_repr(node: NodeId, graph: &V8HeapGraph) -> String {
     let node = graph.node(node);
 
     match node.typ() {
         NodeType::String => print_safe(node.name(), 30),
+        NodeType::Synthetic => node.name().to_string(),
         NodeType::ConcatString => {
             let first = graph
                 .find_edge(node.id, EdgeType::Internal, "first")

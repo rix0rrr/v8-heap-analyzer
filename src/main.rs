@@ -14,8 +14,7 @@ use std::path::PathBuf;
 use crate::analysis::dominator_tree::tree_from_immediate_dominators;
 // Import the shared analysis functions
 use crate::graph::v8_heap_graph::V8HeapGraph;
-use crate::report::print_dominator_tree;
-use crate::report::print_graph;
+use crate::report::{explore_graph, print_dominator_tree, print_graph};
 use crate::snapshot::read_v8_snapshot_file;
 use crate::types::NodeId;
 use crate::utils::format_bytes;
@@ -48,6 +47,10 @@ struct Cli {
     /// Print the dominator tree
     #[arg(short, long, default_value = "false")]
     tree: bool,
+
+    /// Explore the dominator tree interactively
+    #[arg(short, long, default_value = "false")]
+    explore: bool,
 }
 
 fn main() -> Result<()> {
@@ -81,6 +84,10 @@ fn main() -> Result<()> {
     if args.tree {
         println!("");
         print_dominator_tree(&tree, &graph);
+    }
+
+    if args.explore {
+        explore_graph(&tree, &graph)?;
     }
 
     /*
