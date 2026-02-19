@@ -8,10 +8,12 @@ use itertools::Itertools;
 use ratatui::{
     Frame, Terminal,
     backend::CrosstermBackend,
-    layout::{Constraint, Layout},
+    layout::{Constraint, Direction, Layout, Spacing},
+    prelude::Backend,
     style::{Color, Modifier, Style},
+    symbols::merge::MergeStrategy,
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Padding, Paragraph},
+    widgets::{Block, List, ListItem, Padding, Paragraph},
 };
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -54,6 +56,7 @@ struct ExplorerState<'a> {
     pub expanded: HashSet<UiTreeId>,
     pub flat_list: Vec<(&'a UiTreeNode, usize)>,
     pub root: &'a UiTreeNode,
+    pub info_open: bool,
 }
 
 impl<'a> ExplorerState<'a> {
@@ -70,6 +73,7 @@ impl<'a> ExplorerState<'a> {
             expanded,
             flat_list,
             root,
+            info_open: false,
         }
     }
 
@@ -158,105 +162,159 @@ pub fn explore_graph(tree: &DominatorTree, graph: &V8HeapGraph) -> Result<()> {
     let mut state = ExplorerState::new(&root);
 
     loop {
-        terminal.draw(&mut |frame: &mut Frame<'_>| {
-            state.height = frame.area().height.saturating_sub(5) as usize;
+        draw(&mut terminal, &mut state)?;
+        let action = handle_input(&mut state)?;
 
-            let chunks = Layout::default()
-                .constraints([Constraint::Min(0), Constraint::Length(3)])
-                .split(frame.area());
-
-            // We need to virtualize this tree, otherwise it's too big
-            let tree_slice = (state.scroll_offset)
-                ..(state.scroll_offset + state.height).min(state.flat_list.len());
-
-            let items: Vec<ListItem> = state.flat_list[tree_slice]
-                .iter()
-                .map(|(node, depth)| {
-                    let prefix = "  ".repeat(*depth);
-                    let expand_marker = match state.expanded.contains(&node.id) {
-                        _ if node.children.is_empty() => "  ",
-                        true => "▼ ",
-                        false => "▶ ",
-                    };
-
-                    ListItem::new(Line::from(vec![
-                        Span::raw(prefix),
-                        Span::raw(expand_marker),
-                        Span::styled(
-                            format!("{:>7}  ", format_bytes(node.retained_size)),
-                            Style::default().fg(Color::Yellow),
-                        ),
-                        if matches!(node.id, UiTreeId::Heap(_)) {
-                            Span::raw(&node.label)
-                        } else {
-                            Span::styled(&node.label, Style::default().fg(Color::Green))
-                        },
-                    ]))
-                })
-                .collect();
-
-            let list = List::new(items)
-                .highlight_style(
-                    Style::default()
-                        .bg(Color::DarkGray)
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                )
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title("Dominator Tree"),
-                );
-
-            frame.render_stateful_widget(
-                list,
-                chunks[0],
-                &mut ratatui::widgets::ListState::default()
-                    .with_selected(Some(state.selected - state.scroll_offset)),
-            );
-
-            let help = Paragraph::new("←/↓/↑/→ h/j/k/l: Navigate | Enter/Space: Toggle | q: Quit")
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .padding(Padding::horizontal(2)),
-                );
-            frame.render_widget(help, chunks[1]);
-        })?;
-
-        if event::poll(std::time::Duration::from_millis(1000))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Char('q') => break,
-                        KeyCode::Char('g') => state.move_selection(isize::MIN),
-                        KeyCode::Down | KeyCode::Char('j') => state.move_selection(1),
-                        KeyCode::PageDown | KeyCode::Char('J') => {
-                            state.move_selection(state.height as isize)
-                        }
-                        KeyCode::Up | KeyCode::Char('k') => state.move_selection(-1),
-                        KeyCode::PageUp | KeyCode::Char('K') => {
-                            state.move_selection(-(state.height as isize))
-                        }
-                        KeyCode::Right | KeyCode::Char('l') => {
-                            state.expand_selected();
-                        }
-                        KeyCode::Enter | KeyCode::Char(' ') => {
-                            state.toggle_selected();
-                        }
-                        KeyCode::Left | KeyCode::Char('h') => {
-                            state.collapse_selected();
-                        }
-                        _ => {}
-                    }
-                }
-            }
+        if matches!(action, AppAction::Quit) {
+            break;
         }
     }
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     Ok(())
+}
+
+fn draw<T: Backend>(terminal: &mut Terminal<T>, state: &mut ExplorerState) -> Result<()>
+where
+    T::Error: Send + Sync + 'static,
+{
+    terminal.draw(|frame: &mut Frame<'_>| {
+        state.height = frame.area().height.saturating_sub(5) as usize;
+
+        let v_chunks = Layout::default()
+            .constraints([Constraint::Min(0), Constraint::Length(3)])
+            .spacing(Spacing::Overlap(1))
+            .split(frame.area());
+
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Fill(1),
+                if state.info_open {
+                    Constraint::Percentage(50)
+                } else {
+                    Constraint::Length(0)
+                },
+            ])
+            .spacing(Spacing::Overlap(1))
+            .split(v_chunks[0]);
+
+        // We need to virtualize this tree, otherwise it's too big
+        let tree_slice =
+            (state.scroll_offset)..(state.scroll_offset + state.height).min(state.flat_list.len());
+
+        let items: Vec<ListItem> = state.flat_list[tree_slice]
+            .iter()
+            .map(|(node, depth)| {
+                let prefix = "  ".repeat(*depth);
+                let expand_marker = match state.expanded.contains(&node.id) {
+                    _ if node.children.is_empty() => "  ",
+                    true => "▼ ",
+                    false => "▶ ",
+                };
+
+                ListItem::new(Line::from(vec![
+                    Span::raw(prefix),
+                    Span::raw(expand_marker),
+                    Span::styled(
+                        format!("{:>7}  ", format_bytes(node.retained_size)),
+                        Style::default().fg(Color::Yellow),
+                    ),
+                    if matches!(node.id, UiTreeId::Heap(_)) {
+                        Span::raw(&node.label)
+                    } else {
+                        Span::styled(&node.label, Style::default().fg(Color::Green))
+                    },
+                ]))
+            })
+            .collect();
+
+        let list = List::new(items)
+            .highlight_style(
+                Style::default()
+                    .bg(Color::DarkGray)
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .block(
+                Block::bordered()
+                    .merge_borders(MergeStrategy::Exact)
+                    .title("Dominator Tree"),
+            );
+
+        frame.render_stateful_widget(
+            list,
+            chunks[0],
+            &mut ratatui::widgets::ListState::default()
+                .with_selected(Some(state.selected - state.scroll_offset)),
+        );
+
+        if state.info_open {
+            frame.render_widget(
+                Paragraph::new("info").block(
+                    Block::bordered()
+                        .title("Inspector")
+                        .merge_borders(MergeStrategy::Exact)
+                        .padding(Padding::horizontal(2)),
+                ),
+                chunks[1],
+            );
+        }
+
+        frame.render_widget(
+            Paragraph::new(
+                "←/↓/↑/→ h/j/k/l: Navigate | Enter/Space: Toggle | i: Inspector | q: Quit",
+            )
+            .block(
+                Block::bordered()
+                    .merge_borders(MergeStrategy::Exact)
+                    .padding(Padding::horizontal(2)),
+            ),
+            v_chunks[1],
+        );
+    })?;
+    Ok(())
+}
+
+enum AppAction {
+    Quit,
+    Continue,
+}
+
+fn handle_input(state: &mut ExplorerState) -> Result<AppAction> {
+    if event::poll(std::time::Duration::from_millis(1000))? {
+        if let Event::Key(key) = event::read()? {
+            if key.kind == KeyEventKind::Press {
+                match key.code {
+                    KeyCode::Char('q') => return Ok(AppAction::Quit),
+                    KeyCode::Char('g') => state.move_selection(isize::MIN),
+                    KeyCode::Down | KeyCode::Char('j') => state.move_selection(1),
+                    KeyCode::PageDown | KeyCode::Char('J') => {
+                        state.move_selection(state.height as isize)
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => state.move_selection(-1),
+                    KeyCode::PageUp | KeyCode::Char('K') => {
+                        state.move_selection(-(state.height as isize))
+                    }
+                    KeyCode::Right | KeyCode::Char('l') => {
+                        state.expand_selected();
+                    }
+                    KeyCode::Enter | KeyCode::Char(' ') => {
+                        state.toggle_selected();
+                    }
+                    KeyCode::Left | KeyCode::Char('h') => {
+                        state.collapse_selected();
+                    }
+                    KeyCode::Char('i') => {
+                        state.info_open = !state.info_open;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    Ok(AppAction::Continue)
 }
 
 /// Build a UI tree from the given graph and node

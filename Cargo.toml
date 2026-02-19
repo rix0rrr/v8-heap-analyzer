@@ -15,7 +15,7 @@ thiserror = "1.0"
 struson = { version = "0.7.2", features = ["simple-api", "serde"] }
 fixedbitset = "0.5.7"
 itertools = "0.14.0"
-ratatui = "0.29"
+ratatui = "0.30"
 crossterm = "0.28"
 
 [dev-dependencies]
