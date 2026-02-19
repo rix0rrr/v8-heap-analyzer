@@ -42,11 +42,11 @@ pub fn format_bytes(bytes: usize) -> String {
     const GB: usize = MB * 1024;
 
     if bytes >= GB {
-        format!("{:.2}G", bytes as f64 / GB as f64)
+        format!("{:.1}G", bytes as f64 / GB as f64)
     } else if bytes >= MB {
-        format!("{:.2}M", bytes as f64 / MB as f64)
+        format!("{:.1}M", bytes as f64 / MB as f64)
     } else if bytes >= KB {
-        format!("{:.2}k", bytes as f64 / KB as f64)
+        format!("{:.1}k", bytes as f64 / KB as f64)
     } else {
         format!("{}b", bytes)
     }

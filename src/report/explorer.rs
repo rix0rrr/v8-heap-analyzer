@@ -5,12 +5,12 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
-    Terminal,
+    Frame, Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, List, ListItem, Padding, Paragraph},
 };
 use std::collections::HashSet;
 use std::io;
@@ -30,6 +30,100 @@ struct TreeNode {
     children: Vec<TreeNode>,
 }
 
+struct ExplorerState<'a> {
+    pub selected: usize,
+    pub scroll_offset: usize,
+    pub height: usize,
+    pub expanded: HashSet<NodeId>,
+    pub flat_list: Vec<(&'a TreeNode, usize)>,
+    pub root: &'a TreeNode,
+}
+
+impl<'a> ExplorerState<'a> {
+    pub fn new(root: &'a TreeNode) -> Self {
+        let mut expanded = HashSet::<NodeId>::new();
+        expanded.insert(0); // Root starts expanded
+
+        let flat_list = flatten_tree(&root, &expanded);
+
+        ExplorerState {
+            selected: 0,
+            scroll_offset: 0,
+            height: 0,
+            expanded,
+            flat_list,
+            root,
+        }
+    }
+
+    pub fn move_selection(&mut self, delta: isize) {
+        if delta > 0 {
+            self.selected = (self.selected + delta as usize).min(self.flat_list.len() - 1)
+        } else {
+            self.selected = self.selected.saturating_sub((-delta) as usize);
+        }
+        if self.selected >= self.scroll_offset + self.height {
+            self.scroll_offset = self.selected - self.height + 1;
+        }
+        if self.selected < self.scroll_offset {
+            self.scroll_offset = self.selected;
+        }
+    }
+
+    pub fn toggle_selected(&mut self) {
+        let node_id = self.selected_id();
+        if !self.flat_list[self.selected].0.children.is_empty() {
+            if self.expanded.contains(&node_id) {
+                self.expanded.remove(&node_id);
+            } else {
+                self.expanded.insert(node_id);
+            }
+            self.update_flat_list();
+        }
+    }
+
+    pub fn expand_selected(&mut self) {
+        let node_id = self.selected_id();
+        if !self.flat_list[self.selected].0.children.is_empty() && !self.expanded.contains(&node_id)
+        {
+            self.expanded.insert(node_id);
+            self.update_flat_list();
+        }
+    }
+
+    pub fn collapse_selected(&mut self) {
+        let node_id = self.selected_id();
+        if self.expanded.contains(&node_id) {
+            self.expanded.remove(&node_id);
+            self.update_flat_list();
+        } else {
+            // Find parent and collapse it
+            let current_depth = self.flat_list[self.selected].1;
+            if current_depth > 0 {
+                for i in (0..self.selected).rev() {
+                    if self.flat_list[i].1 < current_depth {
+                        let parent_id = self.flat_list[i].0.id;
+                        if self.expanded.contains(&parent_id) {
+                            self.expanded.remove(&parent_id);
+                            self.update_flat_list();
+                            self.selected = i;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    fn selected_id(&self) -> NodeId {
+        self.flat_list[self.selected].0.id
+    }
+
+    fn update_flat_list(&mut self) {
+        self.flat_list = flatten_tree(&self.root, &self.expanded);
+    }
+}
+
 pub fn explore_graph(tree: &DominatorTree, graph: &V8HeapGraph) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -37,140 +131,90 @@ pub fn explore_graph(tree: &DominatorTree, graph: &V8HeapGraph) -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
+    // Shared state between draw and poll
     let root = build_tree_node(0, tree, graph, 0);
-    let mut selected = 0;
-    let mut offset = 0;
-    let mut expanded: HashSet<NodeId> = HashSet::new();
-    expanded.insert(0); // Root starts expanded
-    let mut flat_list = flatten_tree(&root, &expanded);
+    let mut state = ExplorerState::new(&root);
 
     loop {
-        let height = terminal.size()?.height.saturating_sub(5) as usize;
+        terminal.draw(&mut |frame: &mut Frame<'_>| {
+            state.height = frame.area().height.saturating_sub(5) as usize;
 
-        terminal.draw(|f| {
             let chunks = Layout::default()
                 .constraints([Constraint::Min(0), Constraint::Length(3)])
-                .split(f.area());
+                .split(frame.area());
 
-            let items: Vec<ListItem> = flat_list
+            let items: Vec<ListItem> = state
+                .flat_list
                 .iter()
-                .skip(offset)
-                .take(height)
-                .enumerate()
-                .map(|(i, (node, depth))| {
-                    let actual_index = offset + i;
+                .map(|(node, depth)| {
                     let prefix = "  ".repeat(*depth);
-                    let expand_marker = if !node.children.is_empty() {
-                        if expanded.contains(&node.id) {
-                            "▼ "
-                        } else {
-                            "▶ "
-                        }
-                    } else {
-                        "  "
+                    let expand_marker = match state.expanded.contains(&node.id) {
+                        _ if node.children.is_empty() => "  ",
+                        true => "▼ ",
+                        false => "▶ ",
                     };
 
-                    let style = Style::default();
-                    let label_style = Style::default();
-
                     ListItem::new(Line::from(vec![
-                        Span::styled(prefix, style),
-                        Span::styled(expand_marker, style),
-                        Span::styled(&node.label, label_style),
-                        Span::styled(format!("  ({})", format_bytes(node.retained_size)), style),
+                        Span::raw(prefix),
+                        Span::raw(expand_marker),
+                        Span::raw(format!("  {:>7}  ", format_bytes(node.retained_size))),
+                        Span::raw(&node.label),
                     ]))
                 })
                 .collect();
 
             let list = List::new(items)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title("Dominator Tree"),
-                )
                 .highlight_style(
                     Style::default()
                         .bg(Color::DarkGray)
                         .fg(Color::Yellow)
                         .add_modifier(Modifier::BOLD),
+                )
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Dominator Tree"),
                 );
 
-            f.render_stateful_widget(
+            frame.render_stateful_widget(
                 list,
                 chunks[0],
-                &mut ratatui::widgets::ListState::default().with_selected(Some(selected)),
+                &mut ratatui::widgets::ListState::default()
+                    .with_selected(Some(state.selected))
+                    .with_offset(state.scroll_offset),
             );
 
-            let help = Paragraph::new(
-                "↑/↓: Navigate | →: Expand | ←: Collapse | Enter/Space: Toggle | q: Quit",
-            )
-            .block(Block::default().borders(Borders::ALL));
-            f.render_widget(help, chunks[1]);
+            let help = Paragraph::new("←/↓/↑/→ h/j/k/l: Navigate | Enter/Space: Toggle | q: Quit")
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .padding(Padding::horizontal(2)),
+                );
+            frame.render_widget(help, chunks[1]);
         })?;
 
-        if event::poll(std::time::Duration::from_millis(100))? {
+        if event::poll(std::time::Duration::from_millis(1000))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
                     match key.code {
                         KeyCode::Char('q') => break,
-                        KeyCode::Down => {
-                            if selected < flat_list.len() - 1 {
-                                selected += 1;
-                                if selected >= offset + height {
-                                    offset = selected - height + 1;
-                                }
-                            }
+                        KeyCode::Char('g') => state.move_selection(isize::MIN),
+                        KeyCode::Down | KeyCode::Char('j') => state.move_selection(1),
+                        KeyCode::PageDown | KeyCode::Char('J') => {
+                            state.move_selection(state.height as isize)
                         }
-                        KeyCode::Up => {
-                            if selected > 0 {
-                                selected -= 1;
-                                if selected < offset {
-                                    offset = selected;
-                                }
-                            }
+                        KeyCode::Up | KeyCode::Char('k') => state.move_selection(-1),
+                        KeyCode::PageUp | KeyCode::Char('K') => {
+                            state.move_selection(-(state.height as isize))
                         }
-                        KeyCode::Right => {
-                            let node_id = flat_list[selected].0.id;
-                            if !flat_list[selected].0.children.is_empty()
-                                && !expanded.contains(&node_id)
-                            {
-                                expanded.insert(node_id);
-                                flat_list = flatten_tree(&root, &expanded);
-                            }
+                        KeyCode::Right | KeyCode::Char('l') => {
+                            state.expand_selected();
                         }
                         KeyCode::Enter | KeyCode::Char(' ') => {
-                            let node_id = flat_list[selected].0.id;
-                            if !flat_list[selected].0.children.is_empty() {
-                                if expanded.contains(&node_id) {
-                                    expanded.remove(&node_id);
-                                } else {
-                                    expanded.insert(node_id);
-                                }
-                                flat_list = flatten_tree(&root, &expanded);
-                            }
+                            state.toggle_selected();
                         }
-                        KeyCode::Left => {
-                            let node_id = flat_list[selected].0.id;
-                            if expanded.contains(&node_id) {
-                                expanded.remove(&node_id);
-                                flat_list = flatten_tree(&root, &expanded);
-                            } else {
-                                // Find parent and collapse it
-                                let current_depth = flat_list[selected].1;
-                                if current_depth > 0 {
-                                    for i in (0..selected).rev() {
-                                        if flat_list[i].1 < current_depth {
-                                            let parent_id = flat_list[i].0.id;
-                                            if expanded.contains(&parent_id) {
-                                                expanded.remove(&parent_id);
-                                                flat_list = flatten_tree(&root, &expanded);
-                                                selected = i;
-                                            }
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
+                        KeyCode::Left | KeyCode::Char('h') => {
+                            state.collapse_selected();
                         }
                         _ => {}
                     }
@@ -192,11 +236,7 @@ fn build_tree_node(
 ) -> TreeNode {
     let node = graph.node(node_id);
     let retained_size = tree.retained_sizes[node_id as usize];
-    let label = format!(
-        "[{}] {}",
-        node.stable_id(),
-        minimal_node_repr(node.id, graph)
-    );
+    let label = minimal_node_repr(node.id, graph);
 
     let children = if let Some(mut child_ids) = tree.children.get(&node_id).cloned() {
         child_ids.sort_by_key(|n| -(tree.retained_sizes[*n as usize] as i64));
