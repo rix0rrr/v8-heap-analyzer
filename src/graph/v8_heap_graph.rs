@@ -229,7 +229,7 @@ impl<'a> Node<'a> {
     pub fn print_safe_name(&self, max_len: usize) -> Cow<'a, str> {
         match self.typ() {
             NodeType::String => Cow::Owned(print_safe(self.name(), max_len)),
-            _ => Cow::Borrowed(&self.name()),
+            _ => Cow::Borrowed(self.name()),
         }
     }
 

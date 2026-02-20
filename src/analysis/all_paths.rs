@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use fixedbitset::FixedBitSet;
 
 use crate::graph::lengauer_tarjan::GraphOps;
-use crate::graph::v8_heap_graph::{Edge, EdgeId, V8HeapGraph};
+use crate::graph::v8_heap_graph::{Edge, EdgeId, EdgeType, V8HeapGraph};
 use crate::types::NodeId;
 
 #[derive(Clone, Debug, Default)]
@@ -50,6 +50,11 @@ pub fn find_root_paths(graph: &V8HeapGraph, root: NodeId) -> RootPaths {
     seen.put(0);
     while let Some(from_node) = queue.pop_front() {
         for edge in graph.out_edges(from_node) {
+            // Skip weak and shortcut edges
+            if matches!(edge.typ(), EdgeType::Weak | EdgeType::Shortcut) {
+                continue;
+            }
+
             if !seen.put(edge.to_node() as usize) {
                 paths[edge.to_node() as usize].push(edge.id);
                 queue.push_back(edge.to_node());

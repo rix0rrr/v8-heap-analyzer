@@ -84,12 +84,12 @@ fn main() -> Result<()> {
     std::mem::drop(_t);
 
     if args.print {
-        println!("");
+        println!();
         print_graph(&graph, &root_paths, &tree);
     }
 
     if args.tree {
-        println!("");
+        println!();
         print_dominator_tree(&tree, &graph);
     }
 

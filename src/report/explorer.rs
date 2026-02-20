@@ -50,19 +50,29 @@ struct UiTreeNode {
     label: String,
     retained_size: usize,
     children: Vec<UiTreeNode>,
+}
+
+struct FlatUiTreeNode<'a> {
+    node: &'a UiTreeNode,
     depth: usize,
 }
 
-struct FlatUiTreeNode<'a> {}
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
+enum Focus {
+    Tree,
+    Inspector,
+}
 
 struct ExplorerState<'a> {
     pub selected: usize,
-    pub scroll_offset: usize,
+    pub tree_scroll_offset: usize,
+    pub inspector_scroll_offset: u16,
     pub height: usize,
     pub expanded: HashSet<UiTreeId>,
-    pub flat_list: Vec<&'a UiTreeNode>,
+    pub flat_list: Vec<FlatUiTreeNode<'a>>,
     pub root: &'a UiTreeNode,
     pub info_open: bool,
+    pub focus: Focus,
 }
 
 impl<'a> ExplorerState<'a> {
@@ -70,31 +80,36 @@ impl<'a> ExplorerState<'a> {
         let mut expanded = HashSet::<UiTreeId>::new();
         expanded.insert(UiTreeId::Heap(0)); // Root starts expanded
 
-        let flat_list = flatten_tree(&root, &expanded);
+        let flat_list = flatten_tree(root, &expanded);
 
         ExplorerState {
             selected: 0,
-            scroll_offset: 0,
+            tree_scroll_offset: 0,
+            inspector_scroll_offset: 0,
             height: 0,
             expanded,
             flat_list,
             root,
             info_open: false,
+            focus: Focus::Tree,
         }
     }
 
     pub fn set_selection(&mut self, selected: usize) {
-        self.selected = selected;
-        if self.selected >= self.scroll_offset + self.height {
-            self.scroll_offset = self.selected - self.height + 1;
+        if selected != self.selected {
+            self.inspector_scroll_offset = 0;
         }
-        if self.selected < self.scroll_offset {
-            self.scroll_offset = self.selected;
+        self.selected = selected;
+        if self.selected >= self.tree_scroll_offset + self.height {
+            self.tree_scroll_offset = self.selected - self.height + 1;
+        }
+        if self.selected < self.tree_scroll_offset {
+            self.tree_scroll_offset = self.selected;
         }
     }
 
     pub fn selected_node(&self) -> &UiTreeNode {
-        &self.flat_list[self.selected]
+        self.flat_list[self.selected].node
     }
 
     pub fn move_selection(&mut self, delta: isize) {
@@ -107,7 +122,7 @@ impl<'a> ExplorerState<'a> {
 
     pub fn toggle_selected(&mut self) {
         let node_id = self.selected_id();
-        if !self.flat_list[self.selected].children.is_empty() {
+        if !self.selected_node().children.is_empty() {
             if self.expanded.contains(&node_id) {
                 self.expanded.remove(&node_id);
             } else {
@@ -119,7 +134,7 @@ impl<'a> ExplorerState<'a> {
 
     pub fn expand_selected(&mut self) {
         let node_id = self.selected_id();
-        if !self.flat_list[self.selected].children.is_empty() && !self.expanded.contains(&node_id) {
+        if !self.selected_node().children.is_empty() && !self.expanded.contains(&node_id) {
             self.expanded.insert(node_id);
             self.update_flat_list();
         }
@@ -136,7 +151,7 @@ impl<'a> ExplorerState<'a> {
             if current_depth > 0 {
                 for i in (0..self.selected).rev() {
                     if self.flat_list[i].depth < current_depth {
-                        let parent_id = self.flat_list[i].id;
+                        let parent_id = self.flat_list[i].node.id;
                         if self.expanded.contains(&parent_id) {
                             self.expanded.remove(&parent_id);
                             self.update_flat_list();
@@ -150,11 +165,11 @@ impl<'a> ExplorerState<'a> {
     }
 
     fn selected_id(&self) -> UiTreeId {
-        self.flat_list[self.selected].id
+        self.selected_node().id
     }
 
     fn update_flat_list(&mut self) {
-        self.flat_list = flatten_tree(&self.root, &self.expanded);
+        self.flat_list = flatten_tree(self.root, &self.expanded);
     }
 }
 
@@ -175,7 +190,7 @@ pub fn explore_graph(
     let mut state = ExplorerState::new(&root);
 
     loop {
-        draw(&mut terminal, &mut state, &root_paths, &graph)?;
+        draw(&mut terminal, &mut state, root_paths, graph)?;
         let action = handle_input(&mut state)?;
 
         if matches!(action, AppAction::Quit) {
@@ -220,14 +235,14 @@ where
 
         // We need to virtualize this tree, otherwise it's too big
         let tree_slice =
-            (state.scroll_offset)..(state.scroll_offset + state.height).min(state.flat_list.len());
+            (state.tree_scroll_offset)..(state.tree_scroll_offset + state.height).min(state.flat_list.len());
 
         let items: Vec<ListItem> = state.flat_list[tree_slice]
             .iter()
             .map(|node| {
                 let prefix = "  ".repeat(node.depth);
-                let expand_marker = match state.expanded.contains(&node.id) {
-                    _ if node.children.is_empty() => "  ",
+                let expand_marker = match state.expanded.contains(&node.node.id) {
+                    _ if node.node.children.is_empty() => "  ",
                     true => "▼ ",
                     false => "▶ ",
                 };
@@ -236,13 +251,13 @@ where
                     Span::raw(prefix),
                     Span::raw(expand_marker),
                     Span::styled(
-                        format!("{:>7}  ", format_bytes(node.retained_size)),
+                        format!("{:>7}  ", format_bytes(node.node.retained_size)),
                         Style::default().fg(Color::Yellow),
                     ),
-                    if matches!(node.id, UiTreeId::Heap(_)) {
-                        Span::raw(&node.label)
+                    if matches!(node.node.id, UiTreeId::Heap(_)) {
+                        Span::raw(&node.node.label)
                     } else {
-                        Span::styled(&node.label, Style::default().fg(Color::Green))
+                        Span::styled(&node.node.label, Style::default().fg(Color::Green))
                     },
                 ]))
             })
@@ -264,25 +279,37 @@ where
         frame.render_stateful_widget(
             list,
             chunks[0],
-            &mut ratatui::widgets::ListState::default()
-                .with_selected(Some(state.selected - state.scroll_offset)),
+            &mut {
+                let mut x = ratatui::widgets::ListState::default();
+                if state.focus == Focus::Tree {
+                    x = x.with_selected(Some(state.selected - state.tree_scroll_offset));
+                }
+                x
+            },
         );
 
         if state.info_open {
             frame.render_widget(
-                render_inspector(state.selected_node(), root_paths, graph).block(
-                    Block::bordered()
+                render_inspector(state.selected_node(), root_paths, graph)
+                .scroll((0, state.inspector_scroll_offset))
+                .block(
+                {
+                    let mut x = Block::bordered()
                         .title("Inspector")
                         .merge_borders(MergeStrategy::Exact)
-                        .padding(Padding::horizontal(2)),
-                ),
+                        .padding(Padding::horizontal(2));
+                    if state.focus == Focus::Inspector {
+                        x = x.border_style(Style::default().bg(Color::DarkGray).fg(Color::Yellow));
+                    }
+                    x
+                }),
                 chunks[1],
             );
         }
 
         frame.render_widget(
             Paragraph::new(
-                "←/↓/↑/→ h/j/k/l: Navigate | Enter/Space: Toggle | i: Inspector | q: Quit",
+                "←/↓/↑/→ h/j/k/l: Navigate | Enter/Space: Toggle | i: Inspector | <Tab>: move focus | q: Quit",
             )
             .block(
                 Block::bordered()
@@ -304,7 +331,7 @@ fn render_inspector<'a>(
         UiTreeId::Group(_) => Paragraph::new(ui_tree_node.label.clone()),
         UiTreeId::Heap(node_id) => {
             let mut s = detailed_node_repr(*node_id, graph);
-            let _ = write!(&mut s, "\n\n");
+            let _ = write!(&mut s, "\n\nPath(s):\n");
             let _ = format_retention_paths(&mut s, *node_id, root_paths, graph);
 
             Paragraph::new(s).wrap(Wrap::default())
@@ -318,35 +345,69 @@ enum AppAction {
 }
 
 fn handle_input(state: &mut ExplorerState) -> Result<AppAction> {
-    if event::poll(std::time::Duration::from_millis(1000))? {
-        if let Event::Key(key) = event::read()? {
-            if key.kind == KeyEventKind::Press {
-                match key.code {
-                    KeyCode::Char('q') => return Ok(AppAction::Quit),
-                    KeyCode::Char('g') => state.move_selection(isize::MIN),
-                    KeyCode::Down | KeyCode::Char('j') => state.move_selection(1),
-                    KeyCode::PageDown | KeyCode::Char('J') => {
-                        state.move_selection(state.height as isize)
-                    }
-                    KeyCode::Up | KeyCode::Char('k') => state.move_selection(-1),
-                    KeyCode::PageUp | KeyCode::Char('K') => {
-                        state.move_selection(-(state.height as isize))
-                    }
-                    KeyCode::Right | KeyCode::Char('l') => {
-                        state.expand_selected();
-                    }
-                    KeyCode::Enter | KeyCode::Char(' ') => {
-                        state.toggle_selected();
-                    }
-                    KeyCode::Left | KeyCode::Char('h') => {
-                        state.collapse_selected();
-                    }
-                    KeyCode::Char('i') => {
-                        state.info_open = !state.info_open;
-                    }
-                    _ => {}
+    if event::poll(std::time::Duration::from_millis(1000))?
+        && let Event::Key(key) = event::read()?
+        && key.kind == KeyEventKind::Press
+    {
+        if state.focus == Focus::Tree {
+            match key.code {
+                KeyCode::Char('g') => state.move_selection(isize::MIN),
+                KeyCode::Down | KeyCode::Char('j') => state.move_selection(1),
+                KeyCode::PageDown | KeyCode::Char('J') => {
+                    state.move_selection(state.height as isize)
+                }
+                KeyCode::Up | KeyCode::Char('k') => state.move_selection(-1),
+                KeyCode::PageUp | KeyCode::Char('K') => {
+                    state.move_selection(-(state.height as isize))
+                }
+                KeyCode::Right | KeyCode::Char('l') => {
+                    state.expand_selected();
+                }
+                KeyCode::Enter | KeyCode::Char(' ') => {
+                    state.toggle_selected();
+                }
+                KeyCode::Left | KeyCode::Char('h') => {
+                    state.collapse_selected();
+                }
+                _ => {}
+            }
+        }
+
+        if state.focus == Focus::Inspector {
+            match key.code {
+                KeyCode::Char('g') => state.inspector_scroll_offset = 0,
+                KeyCode::Down | KeyCode::Char('j') => state.inspector_scroll_offset += 1,
+                KeyCode::PageDown | KeyCode::Char('J') => {
+                    state.inspector_scroll_offset += state.height as u16;
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    state.inspector_scroll_offset = state.inspector_scroll_offset.saturating_sub(1)
+                }
+                KeyCode::PageUp | KeyCode::Char('K') => {
+                    state.inspector_scroll_offset = state
+                        .inspector_scroll_offset
+                        .saturating_sub(state.height as u16);
+                }
+                _ => {}
+            }
+        }
+
+        match key.code {
+            KeyCode::Char('q') => return Ok(AppAction::Quit),
+            KeyCode::Char('i') => {
+                state.info_open = !state.info_open;
+                if !state.info_open && state.focus == Focus::Inspector {
+                    state.focus = Focus::Tree;
                 }
             }
+            KeyCode::Tab | KeyCode::BackTab => {
+                state.focus = match state.focus {
+                    Focus::Tree if state.info_open => Focus::Inspector,
+                    Focus::Inspector => Focus::Tree,
+                    _ => state.focus,
+                }
+            }
+            _ => {}
         }
     }
     Ok(AppAction::Continue)
@@ -354,15 +415,10 @@ fn handle_input(state: &mut ExplorerState) -> Result<AppAction> {
 
 /// Build a UI tree from the given graph and node
 fn build_ui_tree(node_id: NodeId, tree: &DominatorTree, graph: &V8HeapGraph) -> UiTreeNode {
-    build_ui_tree_rec(node_id, tree, graph, 0)
+    build_ui_tree_rec(node_id, tree, graph)
 }
 
-fn build_ui_tree_rec(
-    node_id: NodeId,
-    tree: &DominatorTree,
-    graph: &V8HeapGraph,
-    depth: usize,
-) -> UiTreeNode {
+fn build_ui_tree_rec(node_id: NodeId, tree: &DominatorTree, graph: &V8HeapGraph) -> UiTreeNode {
     let node = graph.node(node_id);
     let retained_size = tree.retained_size(node_id);
     let label = minimal_node_repr(node.id, graph);
@@ -381,7 +437,7 @@ fn build_ui_tree_rec(
                         | NodeType::Array
                 )
             })
-            .map(|&child| build_ui_tree_rec(child, tree, graph, depth + 1))
+            .map(|&child| build_ui_tree_rec(child, tree, graph))
             .collect()
     } else {
         vec![]
@@ -394,7 +450,6 @@ fn build_ui_tree_rec(
         label,
         retained_size,
         children,
-        depth,
     }
 }
 
@@ -419,8 +474,8 @@ fn find_groups_in_ui_tree_rec(tree: &mut UiTreeNode, group_counter: &mut usize) 
 
             // We have duplicates. The easiest way to deal with this is to rebuild the entire "children" list for this tree node.
             tree.children = labels
-                .into_iter()
-                .map(|(_, indexes)| {
+                .into_values()
+                .map(|indexes| {
                     if indexes.len() == 1 {
                         std::mem::take(&mut old_children[indexes[0]])
                     } else {
@@ -440,7 +495,6 @@ fn find_groups_in_ui_tree_rec(tree: &mut UiTreeNode, group_counter: &mut usize) 
                             ),
                             retained_size,
                             children,
-                            depth: old_children[0].depth,
                         };
                         *group_counter += 1;
                         ret
@@ -458,7 +512,7 @@ fn find_groups_in_ui_tree_rec(tree: &mut UiTreeNode, group_counter: &mut usize) 
 }
 
 /// Flattens the tree out to a list of renderable records, based on the expanded nodes.
-fn flatten_tree<'a>(node: &'a UiTreeNode, expanded: &HashSet<UiTreeId>) -> Vec<&'a UiTreeNode> {
+fn flatten_tree<'a>(node: &'a UiTreeNode, expanded: &HashSet<UiTreeId>) -> Vec<FlatUiTreeNode<'a>> {
     let mut result = vec![];
     flatten_recursive(node, expanded, &mut result, 0);
     result
@@ -467,10 +521,10 @@ fn flatten_tree<'a>(node: &'a UiTreeNode, expanded: &HashSet<UiTreeId>) -> Vec<&
 fn flatten_recursive<'a>(
     node: &'a UiTreeNode,
     expanded: &HashSet<UiTreeId>,
-    result: &mut Vec<&'a UiTreeNode>,
+    result: &mut Vec<FlatUiTreeNode<'a>>,
     depth: usize,
 ) {
-    result.push(node);
+    result.push(FlatUiTreeNode { node, depth });
 
     if expanded.contains(&node.id) {
         for child in &node.children {

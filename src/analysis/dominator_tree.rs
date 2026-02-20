@@ -19,7 +19,7 @@ impl DominatorTree {
     }
 }
 
-pub fn tree_from_immediate_dominators<'a>(
+pub fn tree_from_immediate_dominators(
     immediate_dominators: impl IntoIterator<Item = (NodeId, NodeId)>,
     graph: &V8HeapGraph,
 ) -> DominatorTree {

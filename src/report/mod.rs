@@ -44,7 +44,7 @@ pub fn print_graph(graph: &V8HeapGraph, root_paths: &RootPaths, dom_tree: &Domin
                 minimal_node_repr(edge.to_node(), graph),
             );
         }
-        println!("");
+        println!();
     }
 }
 
@@ -75,8 +75,8 @@ pub fn minimal_node_repr(node: NodeId, graph: &V8HeapGraph) -> String {
 
             format!("<slice of {}>", minimal_node_repr(parent, graph))
         }
-        NodeType::Number => format!("<a number>"),
-        NodeType::BigInt => format!("<a bigint>"),
+        NodeType::Number => "<a number>".to_string(),
+        NodeType::BigInt => "<a bigint>".to_string(),
         NodeType::Closure => format!("function {}()", node.name()),
         NodeType::Symbol => match graph.find_edge(node.id, EdgeType::Internal, "name") {
             Some(name) => format!("symbol {}", minimal_node_repr(name, graph)),
@@ -100,7 +100,7 @@ pub fn minimal_node_repr(node: NodeId, graph: &V8HeapGraph) -> String {
             }
 
             // Format as a regular object
-            return format!(
+            format!(
                 "{} {{ {} }}",
                 node.name(),
                 graph
@@ -108,7 +108,7 @@ pub fn minimal_node_repr(node: NodeId, graph: &V8HeapGraph) -> String {
                     .filter(|e| e.typ() == EdgeType::Property)
                     .map(|e| e.name_or_index().to_string())
                     .join(", ")
-            );
+            )
         }
         _ => format!("{}:{}", node.typ_str(), node.print_safe_name(30)),
     }
@@ -120,9 +120,9 @@ pub fn detailed_node_repr(node: NodeId, graph: &V8HeapGraph) -> String {
     let mut ret = String::new();
 
     match node.typ() {
-        NodeType::String => format!("{}", print_safe(node.name(), 50)),
+        NodeType::String => print_safe(node.name(), 50).to_string(),
         NodeType::Synthetic => {
-            let _ = writeln!(&mut ret, "{}\n", node.name().to_string());
+            let _ = writeln!(&mut ret, "{}\n", node.name());
             print_edges(&mut ret, node.id, graph);
             ret
         }
@@ -147,8 +147,8 @@ pub fn detailed_node_repr(node: NodeId, graph: &V8HeapGraph) -> String {
 
             format!("<slice of {}>", minimal_node_repr(parent, graph))
         }
-        NodeType::Number => format!("<a number>"),
-        NodeType::BigInt => format!("<a bigint>"),
+        NodeType::Number => "<a number>".to_string(),
+        NodeType::BigInt => "<a bigint>".to_string(),
         NodeType::Closure => {
             let _ = writeln!(&mut ret, "function {}()\n", node.name());
             print_edges(&mut ret, node.id, graph);
@@ -156,7 +156,7 @@ pub fn detailed_node_repr(node: NodeId, graph: &V8HeapGraph) -> String {
         }
         NodeType::Symbol => match graph.find_edge(node.id, EdgeType::Internal, "name") {
             Some(name) => format!("symbol {}", minimal_node_repr(name, graph)),
-            None => format!("unnamed symbol"),
+            None => "unnamed symbol".to_string(),
         },
         NodeType::Object => {
             if graph

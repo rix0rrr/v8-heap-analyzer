@@ -35,12 +35,12 @@ impl Visitable for V8HeapGraph {
     type Map = MyFixedBitSet;
 
     #[doc = r" Create a new visitor map"]
-    fn visit_map(self: &Self) -> Self::Map {
+    fn visit_map(&self) -> Self::Map {
         MyFixedBitSet(FixedBitSet::with_capacity(self.total_node_count()))
     }
 
     #[doc = r" Reset the visitor map (and resize to new size of graph if needed)"]
-    fn reset_map(self: &Self, map: &mut Self::Map) {
+    fn reset_map(&self, map: &mut Self::Map) {
         map.0.clear();
         map.0.grow(self.total_node_count());
     }
