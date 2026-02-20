@@ -1,9 +1,11 @@
+use std::fmt::Write;
+
 use itertools::Itertools;
 use petgraph::visit::Bfs;
 
 use crate::{
-    analysis::dominator_tree::DominatorTree,
-    graph::v8_heap_graph::{EdgeType, Node, NodeType, V8HeapGraph},
+    analysis::{all_paths::RootPaths, dominator_tree::DominatorTree},
+    graph::v8_heap_graph::{Edge, EdgeType, Node, NodeType, V8HeapGraph},
     types::NodeId,
     utils::{format_bytes, print_safe},
 };
@@ -12,7 +14,7 @@ pub mod explorer;
 
 pub use explorer::explore_graph;
 
-pub fn print_graph(graph: &V8HeapGraph, dom_tree: &DominatorTree) {
+pub fn print_graph(graph: &V8HeapGraph, root_paths: &RootPaths, dom_tree: &DominatorTree) {
     let mut bfs = Bfs::new(&graph, 0);
     while let Some(nx) = bfs.next(&graph) {
         let node = graph.node(nx);
@@ -28,6 +30,10 @@ pub fn print_graph(graph: &V8HeapGraph, dom_tree: &DominatorTree) {
         );
 
         println!("    {}", minimal_node_repr(node.id, graph));
+
+        let mut s = String::new();
+        let _ = format_retention_paths(&mut s, node.id, root_paths, graph);
+        print!("{}", s);
 
         for edge in graph.out_edges(nx) {
             println!(
@@ -105,6 +111,126 @@ pub fn minimal_node_repr(node: NodeId, graph: &V8HeapGraph) -> String {
             );
         }
         _ => format!("{}:{}", node.typ_str(), node.print_safe_name(30)),
+    }
+}
+
+pub fn detailed_node_repr(node: NodeId, graph: &V8HeapGraph) -> String {
+    let node = graph.node(node);
+
+    let mut ret = String::new();
+
+    match node.typ() {
+        NodeType::String => format!("{}", print_safe(node.name(), 50)),
+        NodeType::Synthetic => {
+            let _ = writeln!(&mut ret, "{}\n", node.name().to_string());
+            print_edges(&mut ret, node.id, graph);
+            ret
+        }
+        NodeType::ConcatString => {
+            let first = graph
+                .find_edge(node.id, EdgeType::Internal, "first")
+                .expect("ConcatString must have first");
+            let second = graph
+                .find_edge(node.id, EdgeType::Internal, "second")
+                .expect("ConcatString must have second");
+
+            format!(
+                "{} + {}",
+                minimal_node_repr(first, graph),
+                minimal_node_repr(second, graph)
+            )
+        }
+        NodeType::SlicedString => {
+            let parent = graph
+                .find_edge(node.id, EdgeType::Internal, "parent")
+                .expect("SlicedString must have parent");
+
+            format!("<slice of {}>", minimal_node_repr(parent, graph))
+        }
+        NodeType::Number => format!("<a number>"),
+        NodeType::BigInt => format!("<a bigint>"),
+        NodeType::Closure => {
+            let _ = writeln!(&mut ret, "function {}()\n", node.name());
+            print_edges(&mut ret, node.id, graph);
+            ret
+        }
+        NodeType::Symbol => match graph.find_edge(node.id, EdgeType::Internal, "name") {
+            Some(name) => format!("symbol {}", minimal_node_repr(name, graph)),
+            None => format!("unnamed symbol"),
+        },
+        NodeType::Object => {
+            if graph
+                .find_edge(node.id, EdgeType::Internal, "elements")
+                .is_some()
+            {
+                let elements = graph
+                    .out_edges(node.id)
+                    .filter(|e| e.typ() == EdgeType::Element)
+                    .map(|e| minimal_node_repr(e.to_node(), graph))
+                    .collect_vec();
+
+                let _ = writeln!(&mut ret, "{} ({} elements)\n", node.name(), elements.len());
+                for el in elements {
+                    let _ = writeln!(&mut ret, " - {}", el);
+                }
+                return ret;
+            }
+
+            let _ = writeln!(&mut ret, "{}\n", node.name());
+            for edge in graph
+                .out_edges(node.id)
+                .filter(|e| e.typ() == EdgeType::Property)
+            {
+                let _ = writeln!(
+                    &mut ret,
+                    "  {}: {}",
+                    edge.name_or_index(),
+                    minimal_node_repr(edge.to_node(), graph)
+                );
+            }
+            ret
+        }
+        _ => format!("{}:{}", node.typ_str(), node.print_safe_name(30)),
+    }
+}
+
+pub fn print_edges<F: std::fmt::Write>(f: &mut F, node: NodeId, graph: &V8HeapGraph) {
+    for edge in graph.out_edges(node) {
+        let _ = writeln!(
+            f,
+            "  -[{}:{}]-> {}  {}",
+            edge.typ_str(),
+            edge.name_or_index(),
+            edge.to_node(),
+            minimal_node_repr(edge.to_node(), graph),
+        );
+    }
+}
+
+pub fn format_retention_paths<F: std::fmt::Write>(
+    f: &mut F,
+    node: NodeId,
+    paths: &RootPaths,
+    graph: &V8HeapGraph,
+) -> std::fmt::Result {
+    for path in paths.paths_to(node, graph) {
+        for edge in path.edges(graph) {
+            fmt_edge(f, &edge)?;
+        }
+        writeln!(f)?;
+    }
+    Ok(())
+}
+
+fn fmt_edge<F: std::fmt::Write>(f: &mut F, edge: &Edge<'_>) -> std::fmt::Result {
+    match edge.typ() {
+        EdgeType::Property => write!(f, ".{}", edge.name_or_index()),
+        EdgeType::Element => write!(f, "[{}]", edge.index()),
+        EdgeType::Internal => write!(f, "(internal/{})", edge.name_or_index()),
+        EdgeType::Context => write!(f, "(context/{})", edge.name_or_index()),
+        EdgeType::Shortcut => write!(f, "(shortcut/{})", edge.name_or_index()),
+        EdgeType::Weak => write!(f, "(weak/{})", edge.name_or_index()),
+        EdgeType::Hidden => write!(f, "(hidden/{})", edge.name_or_index()),
     }
 }
 

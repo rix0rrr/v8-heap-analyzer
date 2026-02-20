@@ -13,15 +13,18 @@ use ratatui::{
     style::{Color, Modifier, Style},
     symbols::merge::MergeStrategy,
     text::{Line, Span},
-    widgets::{Block, List, ListItem, Padding, Paragraph},
+    widgets::{Block, List, ListItem, Padding, Paragraph, Wrap},
 };
-use std::collections::{HashMap, HashSet};
 use std::io;
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Write,
+};
 
 use crate::{
-    analysis::dominator_tree::DominatorTree,
+    analysis::{all_paths::RootPaths, dominator_tree::DominatorTree},
     graph::v8_heap_graph::{NodeType, V8HeapGraph},
-    report::minimal_node_repr,
+    report::{detailed_node_repr, format_retention_paths, minimal_node_repr},
     types::NodeId,
     utils::format_bytes,
 };
@@ -47,14 +50,17 @@ struct UiTreeNode {
     label: String,
     retained_size: usize,
     children: Vec<UiTreeNode>,
+    depth: usize,
 }
+
+struct FlatUiTreeNode<'a> {}
 
 struct ExplorerState<'a> {
     pub selected: usize,
     pub scroll_offset: usize,
     pub height: usize,
     pub expanded: HashSet<UiTreeId>,
-    pub flat_list: Vec<(&'a UiTreeNode, usize)>,
+    pub flat_list: Vec<&'a UiTreeNode>,
     pub root: &'a UiTreeNode,
     pub info_open: bool,
 }
@@ -87,6 +93,10 @@ impl<'a> ExplorerState<'a> {
         }
     }
 
+    pub fn selected_node(&self) -> &UiTreeNode {
+        &self.flat_list[self.selected]
+    }
+
     pub fn move_selection(&mut self, delta: isize) {
         if delta > 0 {
             self.set_selection((self.selected + delta as usize).min(self.flat_list.len() - 1));
@@ -97,7 +107,7 @@ impl<'a> ExplorerState<'a> {
 
     pub fn toggle_selected(&mut self) {
         let node_id = self.selected_id();
-        if !self.flat_list[self.selected].0.children.is_empty() {
+        if !self.flat_list[self.selected].children.is_empty() {
             if self.expanded.contains(&node_id) {
                 self.expanded.remove(&node_id);
             } else {
@@ -109,8 +119,7 @@ impl<'a> ExplorerState<'a> {
 
     pub fn expand_selected(&mut self) {
         let node_id = self.selected_id();
-        if !self.flat_list[self.selected].0.children.is_empty() && !self.expanded.contains(&node_id)
-        {
+        if !self.flat_list[self.selected].children.is_empty() && !self.expanded.contains(&node_id) {
             self.expanded.insert(node_id);
             self.update_flat_list();
         }
@@ -123,11 +132,11 @@ impl<'a> ExplorerState<'a> {
             self.update_flat_list();
         } else {
             // Find parent and collapse it
-            let current_depth = self.flat_list[self.selected].1;
+            let current_depth = self.flat_list[self.selected].depth;
             if current_depth > 0 {
                 for i in (0..self.selected).rev() {
-                    if self.flat_list[i].1 < current_depth {
-                        let parent_id = self.flat_list[i].0.id;
+                    if self.flat_list[i].depth < current_depth {
+                        let parent_id = self.flat_list[i].id;
                         if self.expanded.contains(&parent_id) {
                             self.expanded.remove(&parent_id);
                             self.update_flat_list();
@@ -141,7 +150,7 @@ impl<'a> ExplorerState<'a> {
     }
 
     fn selected_id(&self) -> UiTreeId {
-        self.flat_list[self.selected].0.id
+        self.flat_list[self.selected].id
     }
 
     fn update_flat_list(&mut self) {
@@ -149,7 +158,11 @@ impl<'a> ExplorerState<'a> {
     }
 }
 
-pub fn explore_graph(tree: &DominatorTree, graph: &V8HeapGraph) -> Result<()> {
+pub fn explore_graph(
+    tree: &DominatorTree,
+    root_paths: &RootPaths,
+    graph: &V8HeapGraph,
+) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -162,7 +175,7 @@ pub fn explore_graph(tree: &DominatorTree, graph: &V8HeapGraph) -> Result<()> {
     let mut state = ExplorerState::new(&root);
 
     loop {
-        draw(&mut terminal, &mut state)?;
+        draw(&mut terminal, &mut state, &root_paths, &graph)?;
         let action = handle_input(&mut state)?;
 
         if matches!(action, AppAction::Quit) {
@@ -175,7 +188,12 @@ pub fn explore_graph(tree: &DominatorTree, graph: &V8HeapGraph) -> Result<()> {
     Ok(())
 }
 
-fn draw<T: Backend>(terminal: &mut Terminal<T>, state: &mut ExplorerState) -> Result<()>
+fn draw<T: Backend>(
+    terminal: &mut Terminal<T>,
+    state: &mut ExplorerState,
+    root_paths: &RootPaths,
+    graph: &V8HeapGraph,
+) -> Result<()>
 where
     T::Error: Send + Sync + 'static,
 {
@@ -206,8 +224,8 @@ where
 
         let items: Vec<ListItem> = state.flat_list[tree_slice]
             .iter()
-            .map(|(node, depth)| {
-                let prefix = "  ".repeat(*depth);
+            .map(|node| {
+                let prefix = "  ".repeat(node.depth);
                 let expand_marker = match state.expanded.contains(&node.id) {
                     _ if node.children.is_empty() => "  ",
                     true => "▼ ",
@@ -252,7 +270,7 @@ where
 
         if state.info_open {
             frame.render_widget(
-                Paragraph::new("info").block(
+                render_inspector(state.selected_node(), root_paths, graph).block(
                     Block::bordered()
                         .title("Inspector")
                         .merge_borders(MergeStrategy::Exact)
@@ -275,6 +293,23 @@ where
         );
     })?;
     Ok(())
+}
+
+fn render_inspector<'a>(
+    ui_tree_node: &'a UiTreeNode,
+    root_paths: &'a RootPaths,
+    graph: &'a V8HeapGraph,
+) -> Paragraph<'a> {
+    match &ui_tree_node.id {
+        UiTreeId::Group(_) => Paragraph::new(ui_tree_node.label.clone()),
+        UiTreeId::Heap(node_id) => {
+            let mut s = detailed_node_repr(*node_id, graph);
+            let _ = write!(&mut s, "\n\n");
+            let _ = format_retention_paths(&mut s, *node_id, root_paths, graph);
+
+            Paragraph::new(s).wrap(Wrap::default())
+        }
+    }
 }
 
 enum AppAction {
@@ -319,6 +354,15 @@ fn handle_input(state: &mut ExplorerState) -> Result<AppAction> {
 
 /// Build a UI tree from the given graph and node
 fn build_ui_tree(node_id: NodeId, tree: &DominatorTree, graph: &V8HeapGraph) -> UiTreeNode {
+    build_ui_tree_rec(node_id, tree, graph, 0)
+}
+
+fn build_ui_tree_rec(
+    node_id: NodeId,
+    tree: &DominatorTree,
+    graph: &V8HeapGraph,
+    depth: usize,
+) -> UiTreeNode {
     let node = graph.node(node_id);
     let retained_size = tree.retained_size(node_id);
     let label = minimal_node_repr(node.id, graph);
@@ -337,7 +381,7 @@ fn build_ui_tree(node_id: NodeId, tree: &DominatorTree, graph: &V8HeapGraph) -> 
                         | NodeType::Array
                 )
             })
-            .map(|&child| build_ui_tree(child, tree, graph))
+            .map(|&child| build_ui_tree_rec(child, tree, graph, depth + 1))
             .collect()
     } else {
         vec![]
@@ -350,6 +394,7 @@ fn build_ui_tree(node_id: NodeId, tree: &DominatorTree, graph: &V8HeapGraph) -> 
         label,
         retained_size,
         children,
+        depth,
     }
 }
 
@@ -395,6 +440,7 @@ fn find_groups_in_ui_tree_rec(tree: &mut UiTreeNode, group_counter: &mut usize) 
                             ),
                             retained_size,
                             children,
+                            depth: old_children[0].depth,
                         };
                         *group_counter += 1;
                         ret
@@ -412,10 +458,7 @@ fn find_groups_in_ui_tree_rec(tree: &mut UiTreeNode, group_counter: &mut usize) 
 }
 
 /// Flattens the tree out to a list of renderable records, based on the expanded nodes.
-fn flatten_tree<'a>(
-    node: &'a UiTreeNode,
-    expanded: &HashSet<UiTreeId>,
-) -> Vec<(&'a UiTreeNode, usize)> {
+fn flatten_tree<'a>(node: &'a UiTreeNode, expanded: &HashSet<UiTreeId>) -> Vec<&'a UiTreeNode> {
     let mut result = vec![];
     flatten_recursive(node, expanded, &mut result, 0);
     result
@@ -424,10 +467,10 @@ fn flatten_tree<'a>(
 fn flatten_recursive<'a>(
     node: &'a UiTreeNode,
     expanded: &HashSet<UiTreeId>,
-    result: &mut Vec<(&'a UiTreeNode, usize)>,
+    result: &mut Vec<&'a UiTreeNode>,
     depth: usize,
 ) {
-    result.push((node, depth));
+    result.push(node);
 
     if expanded.contains(&node.id) {
         for child in &node.children {

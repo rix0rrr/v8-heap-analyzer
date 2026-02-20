@@ -256,6 +256,16 @@ pub struct Edge<'a> {
     edges: &'a Edges,
 }
 
+impl<'a> std::fmt::Debug for Edge<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Edge")
+            .field("from", &self.from_node())
+            .field("name_or_index", &self.name_or_index())
+            .field("to", &self.to_node())
+            .finish()
+    }
+}
+
 impl<'a> Edge<'a> {
     pub fn typ(&self) -> EdgeType {
         self.edges.types[self.id.0 as usize].into()
