@@ -4,8 +4,11 @@ use itertools::Itertools;
 use petgraph::visit::Bfs;
 
 use crate::{
-    analysis::{all_paths::RootPaths, dominator_tree::DominatorTree},
-    graph::v8_heap_graph::{Edge, EdgeType, Node, NodeType, V8HeapGraph},
+    analysis::dominator_tree::DominatorTree,
+    graph::{
+        paths::paths_between,
+        v8_heap_graph::{Edge, EdgeType, Node, NodeType, V8HeapGraph},
+    },
     types::NodeId,
     utils::{format_bytes, print_safe},
 };
@@ -14,7 +17,7 @@ pub mod explorer;
 
 pub use explorer::explore_graph;
 
-pub fn print_graph(graph: &V8HeapGraph, root_paths: &RootPaths, dom_tree: &DominatorTree) {
+pub fn print_graph(graph: &V8HeapGraph, dom_tree: &DominatorTree) {
     let mut bfs = Bfs::new(&graph, 0);
     while let Some(nx) = bfs.next(&graph) {
         let node = graph.node(nx);
@@ -32,7 +35,7 @@ pub fn print_graph(graph: &V8HeapGraph, root_paths: &RootPaths, dom_tree: &Domin
         println!("    {}", minimal_node_repr(node.id, graph));
 
         let mut s = String::new();
-        let _ = format_retention_paths(&mut s, node.id, root_paths, graph);
+        let _ = format_retention_paths(&mut s, node.id, 0, graph);
         print!("{}", s);
 
         for edge in graph.out_edges(nx) {
@@ -52,6 +55,7 @@ pub fn minimal_node_repr(node: NodeId, graph: &V8HeapGraph) -> String {
     let node = graph.node(node);
 
     match node.typ() {
+        NodeType::Hidden => node.name().to_string(), // True/false/null/undefined
         NodeType::String => print_safe(node.name(), 30),
         NodeType::Synthetic => node.name().to_string(),
         NodeType::ConcatString => {
@@ -120,6 +124,7 @@ pub fn detailed_node_repr(node: NodeId, graph: &V8HeapGraph) -> String {
     let mut ret = String::new();
 
     match node.typ() {
+        NodeType::Hidden => node.name().to_string(), // True/false/null/undefined
         NodeType::String => print_safe(node.name(), 50).to_string(),
         NodeType::Synthetic => {
             let _ = writeln!(&mut ret, "{}\n", node.name());
@@ -210,11 +215,13 @@ pub fn print_edges<F: std::fmt::Write>(f: &mut F, node: NodeId, graph: &V8HeapGr
 pub fn format_retention_paths<F: std::fmt::Write>(
     f: &mut F,
     node: NodeId,
-    paths: &RootPaths,
+    relative_to: NodeId,
     graph: &V8HeapGraph,
 ) -> std::fmt::Result {
-    for path in paths.paths_to(node, graph) {
-        for edge in path.edges(graph) {
+    for path in paths_between(node, relative_to, graph) {
+        for edge_id in path {
+            let edge = graph.edge(edge_id);
+            write!(f, "({})", edge.from_node())?;
             fmt_edge(f, &edge)?;
         }
         writeln!(f)?;
@@ -226,11 +233,11 @@ fn fmt_edge<F: std::fmt::Write>(f: &mut F, edge: &Edge<'_>) -> std::fmt::Result 
     match edge.typ() {
         EdgeType::Property => write!(f, ".{}", edge.name_or_index()),
         EdgeType::Element => write!(f, "[{}]", edge.index()),
-        EdgeType::Internal => write!(f, "(internal/{})", edge.name_or_index()),
-        EdgeType::Context => write!(f, "(context/{})", edge.name_or_index()),
-        EdgeType::Shortcut => write!(f, "(shortcut/{})", edge.name_or_index()),
-        EdgeType::Weak => write!(f, "(weak/{})", edge.name_or_index()),
-        EdgeType::Hidden => write!(f, "(hidden/{})", edge.name_or_index()),
+        EdgeType::Internal => write!(f, "<internal/{}>", edge.name_or_index()),
+        EdgeType::Context => write!(f, "<context/{}>", edge.name_or_index()),
+        EdgeType::Shortcut => write!(f, "<shortcut/{}>", edge.name_or_index()),
+        EdgeType::Weak => write!(f, "<weak/{}>", edge.name_or_index()),
+        EdgeType::Hidden => write!(f, "<hidden/{}>", edge.name_or_index()),
     }
 }
 

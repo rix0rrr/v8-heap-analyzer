@@ -4,8 +4,14 @@ use crate::{snapshot::StringOrStrings, utils::print_safe};
 
 use super::super::{snapshot::SnapshotFile, types::NodeId};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct EdgeId(NodeId);
+
+impl EdgeId {
+    pub fn new(id: NodeId) -> Self {
+        Self(id)
+    }
+}
 
 pub type GraphPath = Vec<EdgeId>;
 
@@ -287,6 +293,7 @@ impl<'a> Edge<'a> {
         }
     }
 
+    #[allow(clippy::wrong_self_convention)]
     pub fn from_node(&self) -> NodeId {
         self.edges.from_nodes[self.id.0 as usize]
     }

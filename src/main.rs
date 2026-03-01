@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 mod analysis;
 mod graph;
-mod paths;
 mod report;
 mod snapshot;
 mod types;
@@ -11,7 +10,6 @@ use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
 
-use crate::analysis::all_paths::find_root_paths;
 use crate::analysis::dominator_tree::tree_from_immediate_dominators;
 // Import the shared analysis functions
 use crate::graph::v8_heap_graph::V8HeapGraph;
@@ -79,13 +77,9 @@ fn main() -> Result<()> {
     let tree = tree_from_immediate_dominators(lt, &graph);
     std::mem::drop(_t);
 
-    let _t = start_timer("Finding root paths".into());
-    let root_paths = find_root_paths(&graph, root);
-    std::mem::drop(_t);
-
     if args.print {
         println!();
-        print_graph(&graph, &root_paths, &tree);
+        print_graph(&graph, &tree);
     }
 
     if args.tree {
@@ -94,7 +88,7 @@ fn main() -> Result<()> {
     }
 
     if args.explore {
-        explore_graph(&tree, &root_paths, &graph)?;
+        explore_graph(&tree, &graph)?;
     }
 
     /*

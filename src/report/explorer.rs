@@ -13,7 +13,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     symbols::merge::MergeStrategy,
     text::{Line, Span},
-    widgets::{Block, List, ListItem, Padding, Paragraph, Wrap},
+    widgets::{Block, List, ListItem, Padding, Paragraph},
 };
 use std::io;
 use std::{
@@ -22,11 +22,11 @@ use std::{
 };
 
 use crate::{
-    analysis::{all_paths::RootPaths, dominator_tree::DominatorTree},
+    analysis::dominator_tree::DominatorTree,
     graph::v8_heap_graph::{NodeType, V8HeapGraph},
     report::{detailed_node_repr, format_retention_paths, minimal_node_repr},
     types::NodeId,
-    utils::format_bytes,
+    utils::{format_bytes, start_timer},
 };
 
 #[derive(PartialEq, Eq, Hash, Clone, Copy)]
@@ -115,6 +115,18 @@ impl<'a> ExplorerState<'a> {
         self.flat_list[self.selected].node
     }
 
+    /// The heap node id of the first parent of the selected node that is a heap node
+    pub fn parent_heap_node_id(&self) -> Option<NodeId> {
+        let mut i = self.selected;
+        while i > 0 && self.flat_list[i - 1].depth < self.flat_list[i].depth {
+            i -= 1;
+            if let UiTreeId::Heap(node_id) = self.flat_list[i].node.id {
+                return Some(node_id);
+            }
+        }
+        None
+    }
+
     pub fn move_selection(&mut self, delta: isize) {
         if delta > 0 {
             self.set_selection((self.selected + delta as usize).min(self.flat_list.len() - 1));
@@ -176,24 +188,27 @@ impl<'a> ExplorerState<'a> {
     }
 }
 
-pub fn explore_graph(
-    tree: &DominatorTree,
-    root_paths: &RootPaths,
-    graph: &V8HeapGraph,
-) -> Result<()> {
+pub fn explore_graph(tree: &DominatorTree, graph: &V8HeapGraph) -> Result<()> {
+    // Shared state between draw and poll
+
+    let _t = start_timer("Building UI tree".into());
+    let mut root = build_ui_tree(0, tree, graph);
+    std::mem::drop(_t);
+
+    let _t = start_timer("Finding groups".into());
+    find_groups_in_ui_tree(&mut root);
+    std::mem::drop(_t);
+
+    let mut state = ExplorerState::new(&root);
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Shared state between draw and poll
-    let mut root = build_ui_tree(0, tree, graph);
-    find_groups_in_ui_tree(&mut root);
-    let mut state = ExplorerState::new(&root);
-
     loop {
-        draw(&mut terminal, &mut state, root_paths, graph)?;
+        draw(&mut terminal, &mut state, graph)?;
         let action = handle_input(&mut state)?;
 
         if matches!(action, AppAction::Quit) {
@@ -209,7 +224,6 @@ pub fn explore_graph(
 fn draw<T: Backend>(
     terminal: &mut Terminal<T>,
     state: &mut ExplorerState,
-    root_paths: &RootPaths,
     graph: &V8HeapGraph,
 ) -> Result<()>
 where
@@ -292,8 +306,10 @@ where
         );
 
         if state.info_open {
+
+
             frame.render_widget(
-                render_inspector(state.selected_node(), root_paths, graph)
+                render_inspector(state.selected_node(), state.parent_heap_node_id(), graph)
                 .scroll((state.inspector_scroll_offset_y, state.inspector_scroll_offset_x))
                 .block(
                 {
@@ -327,15 +343,19 @@ where
 
 fn render_inspector<'a>(
     ui_tree_node: &'a UiTreeNode,
-    root_paths: &'a RootPaths,
+    parent_heap_node_id: Option<NodeId>,
     graph: &'a V8HeapGraph,
 ) -> Paragraph<'a> {
     match &ui_tree_node.id {
         UiTreeId::Group(_) => Paragraph::new(ui_tree_node.label.clone()),
         UiTreeId::Heap(node_id) => {
-            let mut s = detailed_node_repr(*node_id, graph);
+            let mut s = String::new();
+            let _ = write!(&mut s, "Node {}\n\n", node_id);
+
+            let _ = write!(&mut s, "{}", detailed_node_repr(*node_id, graph));
             let _ = write!(&mut s, "\n\nPath(s):\n");
-            let _ = format_retention_paths(&mut s, *node_id, root_paths, graph);
+            let _ =
+                format_retention_paths(&mut s, *node_id, parent_heap_node_id.unwrap_or(0), graph);
 
             Paragraph::new(s)
         }
@@ -377,6 +397,7 @@ fn handle_input(state: &mut ExplorerState) -> Result<AppAction> {
         }
 
         if state.focus == Focus::Inspector {
+            let hscroll = 3;
             match key.code {
                 KeyCode::Char('g') => state.inspector_scroll_offset_y = 0,
                 KeyCode::Down | KeyCode::Char('j') => state.inspector_scroll_offset_y += 1,
@@ -393,11 +414,11 @@ fn handle_input(state: &mut ExplorerState) -> Result<AppAction> {
                         .saturating_sub(state.height as u16);
                 }
                 KeyCode::Right | KeyCode::Char('l') => {
-                    state.inspector_scroll_offset_x += 1;
+                    state.inspector_scroll_offset_x += hscroll;
                 }
                 KeyCode::Left | KeyCode::Char('h') => {
                     state.inspector_scroll_offset_x =
-                        state.inspector_scroll_offset_x.saturating_sub(1);
+                        state.inspector_scroll_offset_x.saturating_sub(hscroll);
                 }
                 _ => {}
             }

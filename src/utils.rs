@@ -2,7 +2,7 @@ use std::io::Write;
 use std::io::stdout;
 use std::time::Instant;
 
-pub fn print_safe<'a>(name: &'a str, max_len: usize) -> String {
+pub fn print_safe(name: &str, max_len: usize) -> String {
     let mut s = String::new();
     s.push('"');
     if name.len() > max_len {
@@ -29,7 +29,7 @@ pub fn escape_string_chars(s: impl IntoIterator<Item = char>) -> String {
             '\t' => vec!['\\', 't'],
             '\\' => vec!['\\', '\\'],
             '"' => vec!['\\', '"'],
-            c if c < ' ' || c > '~' => vec!['?'],
+            c if !(' '..='~').contains(&c) => vec!['?'],
             c => vec![c],
         })
         .collect()
@@ -52,29 +52,6 @@ pub fn format_bytes(bytes: usize) -> String {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_escape_string() {
-        assert_eq!(escape_string("hello\nworld"), "hello\\nworld");
-        assert_eq!(escape_string("tab\there"), "tab\\there");
-        assert_eq!(escape_string("quote\"test"), "quote\\\"test");
-        assert_eq!(escape_string("backslash\\test"), "backslash\\\\test");
-        assert_eq!(escape_string("normal text"), "normal text");
-    }
-
-    #[test]
-    fn test_format_bytes() {
-        assert_eq!(format_bytes(500), "500b");
-        assert_eq!(format_bytes(1024), "1.00k");
-        assert_eq!(format_bytes(1536), "1.50k");
-        assert_eq!(format_bytes(1048576), "1.00M");
-        assert_eq!(format_bytes(1073741824), "1.00G");
-    }
-}
-
 pub struct Timer {
     name: String,
     start: Instant,
@@ -93,5 +70,28 @@ impl Drop for Timer {
     fn drop(&mut self) {
         let duration = Instant::now() - self.start;
         eprintln!("Done ({:?})", duration);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_escape_string() {
+        assert_eq!(escape_string("hello\nworld"), "hello\\nworld");
+        assert_eq!(escape_string("tab\there"), "tab\\there");
+        assert_eq!(escape_string("quote\"test"), "quote\\\"test");
+        assert_eq!(escape_string("backslash\\test"), "backslash\\\\test");
+        assert_eq!(escape_string("normal text"), "normal text");
+    }
+
+    #[test]
+    fn test_format_bytes() {
+        assert_eq!(format_bytes(500), "500b");
+        assert_eq!(format_bytes(1024), "1.0k");
+        assert_eq!(format_bytes(1536), "1.5k");
+        assert_eq!(format_bytes(1048576), "1.0M");
+        assert_eq!(format_bytes(1073741824), "1.0G");
     }
 }
