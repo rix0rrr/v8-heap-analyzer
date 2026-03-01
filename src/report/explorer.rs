@@ -66,7 +66,8 @@ enum Focus {
 struct ExplorerState<'a> {
     pub selected: usize,
     pub tree_scroll_offset: usize,
-    pub inspector_scroll_offset: u16,
+    pub inspector_scroll_offset_y: u16,
+    pub inspector_scroll_offset_x: u16,
     pub height: usize,
     pub expanded: HashSet<UiTreeId>,
     pub flat_list: Vec<FlatUiTreeNode<'a>>,
@@ -85,7 +86,8 @@ impl<'a> ExplorerState<'a> {
         ExplorerState {
             selected: 0,
             tree_scroll_offset: 0,
-            inspector_scroll_offset: 0,
+            inspector_scroll_offset_y: 0,
+            inspector_scroll_offset_x: 0,
             height: 0,
             expanded,
             flat_list,
@@ -97,7 +99,8 @@ impl<'a> ExplorerState<'a> {
 
     pub fn set_selection(&mut self, selected: usize) {
         if selected != self.selected {
-            self.inspector_scroll_offset = 0;
+            self.inspector_scroll_offset_y = 0;
+            self.inspector_scroll_offset_x = 0;
         }
         self.selected = selected;
         if self.selected >= self.tree_scroll_offset + self.height {
@@ -291,7 +294,7 @@ where
         if state.info_open {
             frame.render_widget(
                 render_inspector(state.selected_node(), root_paths, graph)
-                .scroll((0, state.inspector_scroll_offset))
+                .scroll((state.inspector_scroll_offset_y, state.inspector_scroll_offset_x))
                 .block(
                 {
                     let mut x = Block::bordered()
@@ -334,7 +337,7 @@ fn render_inspector<'a>(
             let _ = write!(&mut s, "\n\nPath(s):\n");
             let _ = format_retention_paths(&mut s, *node_id, root_paths, graph);
 
-            Paragraph::new(s).wrap(Wrap::default())
+            Paragraph::new(s)
         }
     }
 }
@@ -375,18 +378,26 @@ fn handle_input(state: &mut ExplorerState) -> Result<AppAction> {
 
         if state.focus == Focus::Inspector {
             match key.code {
-                KeyCode::Char('g') => state.inspector_scroll_offset = 0,
-                KeyCode::Down | KeyCode::Char('j') => state.inspector_scroll_offset += 1,
+                KeyCode::Char('g') => state.inspector_scroll_offset_y = 0,
+                KeyCode::Down | KeyCode::Char('j') => state.inspector_scroll_offset_y += 1,
                 KeyCode::PageDown | KeyCode::Char('J') => {
-                    state.inspector_scroll_offset += state.height as u16;
+                    state.inspector_scroll_offset_y += state.height as u16;
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
-                    state.inspector_scroll_offset = state.inspector_scroll_offset.saturating_sub(1)
+                    state.inspector_scroll_offset_y =
+                        state.inspector_scroll_offset_y.saturating_sub(1)
                 }
                 KeyCode::PageUp | KeyCode::Char('K') => {
-                    state.inspector_scroll_offset = state
-                        .inspector_scroll_offset
+                    state.inspector_scroll_offset_y = state
+                        .inspector_scroll_offset_y
                         .saturating_sub(state.height as u16);
+                }
+                KeyCode::Right | KeyCode::Char('l') => {
+                    state.inspector_scroll_offset_x += 1;
+                }
+                KeyCode::Left | KeyCode::Char('h') => {
+                    state.inspector_scroll_offset_x =
+                        state.inspector_scroll_offset_x.saturating_sub(1);
                 }
                 _ => {}
             }
