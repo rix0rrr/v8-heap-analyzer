@@ -23,7 +23,7 @@ use std::{
 
 use crate::{
     analysis::dominator_tree::DominatorTree,
-    graph::v8_heap_graph::{NodeType, V8HeapGraph},
+    graph::v8_heap_graph::{Node, NodeType, V8HeapGraph},
     report::{detailed_node_repr, format_retention_paths, minimal_node_repr},
     types::NodeId,
     utils::{format_bytes, start_timer},
@@ -466,8 +466,14 @@ fn build_ui_tree_rec(node_id: NodeId, tree: &DominatorTree, graph: &V8HeapGraph)
                         | NodeType::ConcatString
                         | NodeType::SlicedString
                         | NodeType::Code
-                        | NodeType::Array
                 )
+            })
+            // Explore deeper into Array nodes, if the current node is a Map or Set. The
+            // elements are kept inside Array nodes.
+            .filter(|&&child| {
+                !matches!(graph.node(child).typ(), NodeType::Array)
+                    || is_map_node(&node)
+                    || is_set_node(&node)
             })
             .map(|&child| build_ui_tree_rec(child, tree, graph))
             .collect()
@@ -483,6 +489,14 @@ fn build_ui_tree_rec(node_id: NodeId, tree: &DominatorTree, graph: &V8HeapGraph)
         retained_size,
         children,
     }
+}
+
+fn is_map_node(node: &Node) -> bool {
+    node.typ() == NodeType::Object && node.name() == "Map"
+}
+
+fn is_set_node(node: &Node) -> bool {
+    node.typ() == NodeType::Object && node.name() == "Set"
 }
 
 /// Find and insert groups into this tree

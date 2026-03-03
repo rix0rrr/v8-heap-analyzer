@@ -52,6 +52,9 @@ pub fn print_graph(graph: &V8HeapGraph, dom_tree: &DominatorTree) {
 }
 
 pub fn minimal_node_repr(node: NodeId, graph: &V8HeapGraph) -> String {
+    if node == 0 {
+        return "<root>".to_string();
+    }
     let node = graph.node(node);
 
     match node.typ() {
@@ -119,6 +122,10 @@ pub fn minimal_node_repr(node: NodeId, graph: &V8HeapGraph) -> String {
 }
 
 pub fn detailed_node_repr(node: NodeId, graph: &V8HeapGraph) -> String {
+    if node == 0 {
+        return "<root>".to_string();
+    }
+
     let node = graph.node(node);
 
     let mut ret = String::new();
@@ -218,10 +225,12 @@ pub fn format_retention_paths<F: std::fmt::Write>(
     relative_to: NodeId,
     graph: &V8HeapGraph,
 ) -> std::fmt::Result {
+    writeln!(f, "({})", minimal_node_repr(relative_to, graph))?;
     for path in paths_between(node, relative_to, graph) {
+        write!(f, "  ")?;
         for edge_id in path {
             let edge = graph.edge(edge_id);
-            write!(f, "({})", edge.from_node())?;
+            // write!(f, "({})", edge.from_node())?;
             fmt_edge(f, &edge)?;
         }
         writeln!(f)?;
@@ -233,11 +242,11 @@ fn fmt_edge<F: std::fmt::Write>(f: &mut F, edge: &Edge<'_>) -> std::fmt::Result 
     match edge.typ() {
         EdgeType::Property => write!(f, ".{}", edge.name_or_index()),
         EdgeType::Element => write!(f, "[{}]", edge.index()),
-        EdgeType::Internal => write!(f, "<internal/{}>", edge.name_or_index()),
-        EdgeType::Context => write!(f, "<context/{}>", edge.name_or_index()),
-        EdgeType::Shortcut => write!(f, "<shortcut/{}>", edge.name_or_index()),
-        EdgeType::Weak => write!(f, "<weak/{}>", edge.name_or_index()),
-        EdgeType::Hidden => write!(f, "<hidden/{}>", edge.name_or_index()),
+        EdgeType::Internal => write!(f, "[internal:{}]", edge.name_or_index()),
+        EdgeType::Context => write!(f, "[context:{}]", edge.name_or_index()),
+        EdgeType::Shortcut => write!(f, "[shortcut:{}]", edge.name_or_index()),
+        EdgeType::Weak => write!(f, "[weak:{}]", edge.name_or_index()),
+        EdgeType::Hidden => write!(f, "[hidden:{}]", edge.name_or_index()),
     }
 }
 
