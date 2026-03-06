@@ -121,7 +121,7 @@ pub fn minimal_node_repr(node: NodeId, graph: &V8HeapGraph) -> String {
     }
 }
 
-pub fn detailed_node_repr(node: NodeId, graph: &V8HeapGraph) -> String {
+pub fn detailed_node_repr(node: NodeId, graph: &V8HeapGraph, tree: &DominatorTree) -> String {
     if node == 0 {
         return "<root>".to_string();
     }
@@ -188,16 +188,37 @@ pub fn detailed_node_repr(node: NodeId, graph: &V8HeapGraph) -> String {
                 return ret;
             }
 
-            let _ = writeln!(&mut ret, "{}\n", node.name());
+            let _ = writeln!(
+                &mut ret,
+                "{} (self={})\n",
+                node.name(),
+                format_bytes(graph.self_size_for(node.id))
+            );
+            let _ = writeln!(&mut ret, "PROPERTIES");
             for edge in graph
                 .out_edges(node.id)
                 .filter(|e| e.typ() == EdgeType::Property)
             {
                 let _ = writeln!(
                     &mut ret,
-                    "  {}: {}",
+                    "  {}: {} ({})",
                     edge.name_or_index(),
-                    minimal_node_repr(edge.to_node(), graph)
+                    minimal_node_repr(edge.to_node(), graph),
+                    format_bytes(tree.retained_size(edge.to_node()))
+                );
+            }
+
+            let _ = writeln!(&mut ret, "\nOTHER");
+            for edge in graph
+                .out_edges(node.id)
+                .filter(|e| e.typ() != EdgeType::Property)
+            {
+                let _ = writeln!(
+                    &mut ret,
+                    "  {}: {} ({})",
+                    edge.name_or_index(),
+                    minimal_node_repr(edge.to_node(), graph),
+                    format_bytes(tree.retained_size(edge.to_node()))
                 );
             }
             ret
@@ -225,9 +246,9 @@ pub fn format_retention_paths<F: std::fmt::Write>(
     relative_to: NodeId,
     graph: &V8HeapGraph,
 ) -> std::fmt::Result {
-    writeln!(f, "({})", minimal_node_repr(relative_to, graph))?;
+    writeln!(f, "  ({})", minimal_node_repr(relative_to, graph))?;
     for path in paths_between(node, relative_to, graph) {
-        write!(f, "  ")?;
+        write!(f, "    ")?;
         for edge_id in path {
             let edge = graph.edge(edge_id);
             // write!(f, "({})", edge.from_node())?;

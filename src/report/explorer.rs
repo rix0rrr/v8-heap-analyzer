@@ -208,7 +208,7 @@ pub fn explore_graph(tree: &DominatorTree, graph: &V8HeapGraph) -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     loop {
-        draw(&mut terminal, &mut state, graph)?;
+        draw(&mut terminal, &mut state, graph, tree)?;
         let action = handle_input(&mut state)?;
 
         if matches!(action, AppAction::Quit) {
@@ -225,6 +225,7 @@ fn draw<T: Backend>(
     terminal: &mut Terminal<T>,
     state: &mut ExplorerState,
     graph: &V8HeapGraph,
+    tree: &DominatorTree,
 ) -> Result<()>
 where
     T::Error: Send + Sync + 'static,
@@ -309,7 +310,7 @@ where
 
 
             frame.render_widget(
-                render_inspector(state.selected_node(), state.parent_heap_node_id(), graph)
+                render_inspector(state.selected_node(), state.parent_heap_node_id(), graph, tree)
                 .scroll((state.inspector_scroll_offset_y, state.inspector_scroll_offset_x))
                 .block(
                 {
@@ -345,6 +346,7 @@ fn render_inspector<'a>(
     ui_tree_node: &'a UiTreeNode,
     parent_heap_node_id: Option<NodeId>,
     graph: &'a V8HeapGraph,
+    tree: &DominatorTree,
 ) -> Paragraph<'a> {
     match &ui_tree_node.id {
         UiTreeId::Group(_) => Paragraph::new(ui_tree_node.label.clone()),
@@ -352,8 +354,8 @@ fn render_inspector<'a>(
             let mut s = String::new();
             let _ = write!(&mut s, "Node {}\n\n", node_id);
 
-            let _ = write!(&mut s, "{}", detailed_node_repr(*node_id, graph));
-            let _ = write!(&mut s, "\n\nPath(s):\n");
+            let _ = write!(&mut s, "{}", detailed_node_repr(*node_id, graph, tree));
+            let _ = write!(&mut s, "\n\nPATHS\n");
             let _ =
                 format_retention_paths(&mut s, *node_id, parent_heap_node_id.unwrap_or(0), graph);
 
