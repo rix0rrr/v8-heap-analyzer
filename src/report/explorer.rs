@@ -282,12 +282,18 @@ where
             .collect();
 
         let list = List::new(items)
-            .highlight_style(
-                Style::default()
-                    .bg(Color::DarkGray)
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            )
+            .highlight_style({
+                if state.focus == Focus::Tree {
+                    Style::default()
+                        .bg(Color::DarkGray)
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                }
+            })
             .block(
                 Block::bordered()
                     .merge_borders(MergeStrategy::Exact)
@@ -299,9 +305,7 @@ where
             chunks[0],
             &mut {
                 let mut x = ratatui::widgets::ListState::default();
-                if state.focus == Focus::Tree {
-                    x = x.with_selected(Some(state.selected - state.tree_scroll_offset));
-                }
+                x = x.with_selected(Some(state.selected - state.tree_scroll_offset));
                 x
             },
         );
@@ -352,7 +356,7 @@ fn render_inspector<'a>(
         UiTreeId::Group(_) => Paragraph::new(ui_tree_node.label.clone()),
         UiTreeId::Heap(node_id) => {
             let mut s = String::new();
-            let _ = write!(&mut s, "Node {}\n\n", node_id);
+            let _ = write!(&mut s, "Node #{}\n\n", node_id);
 
             let _ = write!(&mut s, "{}", detailed_node_repr(*node_id, graph, tree));
             let _ = write!(&mut s, "\n\nPATHS\n");

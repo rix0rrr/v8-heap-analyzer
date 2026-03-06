@@ -175,6 +175,7 @@ pub fn detailed_node_repr(node: NodeId, graph: &V8HeapGraph, tree: &DominatorTre
                 .find_edge(node.id, EdgeType::Internal, "elements")
                 .is_some()
             {
+                // Array-like object
                 let elements = graph
                     .out_edges(node.id)
                     .filter(|e| e.typ() == EdgeType::Element)
@@ -201,10 +202,11 @@ pub fn detailed_node_repr(node: NodeId, graph: &V8HeapGraph, tree: &DominatorTre
             {
                 let _ = writeln!(
                     &mut ret,
-                    "  {}: {} ({})",
+                    "  {}: {} ({}) #{}",
                     edge.name_or_index(),
                     minimal_node_repr(edge.to_node(), graph),
-                    format_bytes(tree.retained_size(edge.to_node()))
+                    format_bytes(tree.retained_size(edge.to_node())),
+                    edge.to_node(),
                 );
             }
 
@@ -215,10 +217,11 @@ pub fn detailed_node_repr(node: NodeId, graph: &V8HeapGraph, tree: &DominatorTre
             {
                 let _ = writeln!(
                     &mut ret,
-                    "  {}: {} ({})",
+                    "  {}: {} ({}) #{}",
                     edge.name_or_index(),
                     minimal_node_repr(edge.to_node(), graph),
-                    format_bytes(tree.retained_size(edge.to_node()))
+                    format_bytes(tree.retained_size(edge.to_node())),
+                    edge.to_node(),
                 );
             }
             ret
